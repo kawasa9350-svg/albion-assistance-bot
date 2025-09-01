@@ -342,7 +342,7 @@ module.exports = {
                             await db.updateUserBalance(interaction.guildId, userId, payoutPerPlayer, 'add');
                             
                             // Check if DMs are enabled in config
-                            const config = require('../config.json');
+                            const config = require('../config.js');
                             if (config.features && config.features.enableDMs) {
                                 // Send DM to user about the loot split
                                 try {

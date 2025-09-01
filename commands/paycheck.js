@@ -156,7 +156,7 @@ module.exports = {
                         updatedUsers.push(userId);
                         
                         // Send DM to user about the balance change (if enabled)
-                        const config = require('../config.json');
+                        const config = require('../config.js');
                         if (config.features && config.features.enableDMs) {
                             try {
                                 const user = await interaction.client.users.fetch(userId);

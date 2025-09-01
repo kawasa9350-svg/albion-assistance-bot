@@ -33,7 +33,7 @@ module.exports = {
                 
                             // Check if user should get prefix based on roles (same logic as above)
             const member = interaction.member;
-            const config = require('../config.json');
+            const config = require('../config.js');
             let shouldApplyPrefix = false; // Default to skip prefix
             
             // Check if user has any roles that require prefix
@@ -117,7 +117,7 @@ module.exports = {
 
             // Check if user should get prefix based on roles
             const member = interaction.member;
-            const config = require('../config.json');
+            const config = require('../config.js');
             let shouldApplyPrefix = false; // Default to skip prefix
             
             // Check if user has any roles that require prefix

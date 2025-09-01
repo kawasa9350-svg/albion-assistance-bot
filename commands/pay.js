@@ -92,7 +92,7 @@ module.exports = {
 
             if (senderSuccess && recipientSuccess) {
                 // Send DM to recipient (if enabled)
-                const config = require('../config.json');
+                const config = require('../config.js');
                 if (config.features && config.features.enableDMs) {
                     try {
                         const dmEmbed = new EmbedBuilder()
