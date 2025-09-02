@@ -940,6 +940,9 @@ module.exports = {
                         comps = await db.getComps(interaction.guildId, selectedContentType);
                     }
 
+                    console.log(`Retrieved ${comps.length} comps for content type: ${selectedContentType}`);
+                    console.log('Comps data:', comps);
+
                     // Create the comps display embed
                     const embed = await this.createCompsDisplayEmbed(comps, selectedContentType);
                     
@@ -977,10 +980,11 @@ module.exports = {
                         console.log('Comp list updated successfully with comps and comp name selection');
                     } catch (error) {
                         console.error('Error updating comp list message:', error);
-                        // Try to send a follow-up message, but handle the case where it might fail
+                        // Try to send a follow-up message with the proper embed
                         try {
                             await interaction.followUp({
-                                content: `✅ Showing comps for: ${selectedContentType}`,
+                                embeds: [embed],
+                                components: components,
                                 ephemeral: true
                             });
                         } catch (followUpError) {
@@ -988,7 +992,8 @@ module.exports = {
                             // If follow-up fails, try to reply instead
                             try {
                                 await interaction.reply({
-                                    content: `✅ Showing comps for: ${selectedContentType}`,
+                                    embeds: [embed],
+                                    components: components,
                                     ephemeral: true
                                 });
                             } catch (replyError) {
