@@ -49,42 +49,18 @@ module.exports = {
                     await this.handleList(interaction, db);
                     break;
                 default:
-                    if (!interaction.replied && !interaction.deferred) {
-                        await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
-                    }
+                    await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
             }
         } catch (error) {
             console.error('Error in build command:', error);
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('An error occurred while processing the build command.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
             
-            // Only reply if we haven't already replied or deferred
-            if (!interaction.replied && !interaction.deferred) {
-                try {
-                    const embed = new EmbedBuilder()
-                        .setColor('#FF0000')
-                        .setTitle('❌ Error')
-                        .setDescription('An error occurred while processing the build command.')
-                        .setFooter({ text: 'Phoenix Assistance Bot' })
-                        .setTimestamp();
-                    
-                    await interaction.reply({ embeds: [embed], ephemeral: true });
-                } catch (replyError) {
-                    console.error('Error sending error message:', replyError);
-                }
-            } else if (interaction.deferred && !interaction.replied) {
-                // If we deferred but haven't replied yet, use editReply
-                try {
-                    const embed = new EmbedBuilder()
-                        .setColor('#FF0000')
-                        .setTitle('❌ Error')
-                        .setDescription('An error occurred while processing the build command.')
-                        .setFooter({ text: 'Phoenix Assistance Bot' })
-                        .setTimestamp();
-                    
-                    await interaction.editReply({ embeds: [embed] });
-                } catch (replyError) {
-                    console.error('Error sending error message:', replyError);
-                }
-            }
+            await interaction.reply({ embeds: [embed], ephemeral: true });
         }
     },
 
@@ -367,18 +343,10 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleButtonInteraction:', error);
             try {
-                // Check if we can reply or need to use followUp
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: '❌ An error occurred while processing your interaction. Please try again.',
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.followUp({
-                        content: '❌ An error occurred while processing your interaction. Please try again.',
-                        ephemeral: true
-                    });
-                }
+                await interaction.reply({
+                    content: '❌ An error occurred while processing your interaction. Please try again.',
+                    ephemeral: true
+                });
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -453,18 +421,10 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleModalSubmit:', error);
             try {
-                // Check if we can reply or need to use followUp
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: '❌ An error occurred while processing your input. Please try again.',
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.followUp({
-                        content: '❌ An error occurred while processing your input. Please try again.',
-                        ephemeral: true
-                    });
-                }
+                await interaction.reply({
+                    content: '❌ An error occurred while processing your input. Please try again.',
+                    ephemeral: true
+                });
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -716,86 +676,61 @@ module.exports = {
     },
 
     async handleList(interaction, db) {
-        try {
-            // Defer the reply immediately to prevent timeout
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.deferReply({ ephemeral: true });
-            }
+        // Get available content types for the dropdown
+        const contentTypes = await db.getContentTypes(interaction.guildId);
+        console.log('Available content types for list:', contentTypes);
 
-            // Get available content types for the dropdown
-            const contentTypes = await db.getContentTypes(interaction.guildId);
-            console.log('Available content types for list:', contentTypes);
-
-            // Create content type dropdown
-            const contentTypeSelect = new StringSelectMenuBuilder()
-                .setCustomId('list_content_type_select')
-                .setPlaceholder('Select content type to filter builds')
-                .addOptions([
+        // Create content type dropdown
+        const contentTypeSelect = new StringSelectMenuBuilder()
+            .setCustomId('list_content_type_select')
+            .setPlaceholder('Select content type to filter builds')
+            .addOptions([
+                new StringSelectMenuOptionBuilder()
+                    .setLabel('All Builds')
+                    .setDescription('Show all builds regardless of content type')
+                    .setValue('all')
+                    .setEmoji('📋'),
+                new StringSelectMenuOptionBuilder()
+                    .setLabel('General')
+                    .setDescription('Show only general builds')
+                    .setValue('General')
+                    .setEmoji('📄'),
+                ...contentTypes.map(ct => 
                     new StringSelectMenuOptionBuilder()
-                        .setLabel('All Builds')
-                        .setDescription('Show all builds regardless of content type')
-                        .setValue('all')
-                        .setEmoji('📋'),
-                    new StringSelectMenuOptionBuilder()
-                        .setLabel('General')
-                        .setDescription('Show only general builds')
-                        .setValue('General')
-                        .setEmoji('📄'),
-                    ...contentTypes.map(ct => 
-                        new StringSelectMenuOptionBuilder()
-                            .setLabel(ct)
-                            .setDescription(`Show builds for ${ct}`)
-                            .setValue(ct)
-                            .setEmoji('🎯')
-                    )
-                ]);
-
-            const contentTypeRow = new ActionRowBuilder().addComponents(contentTypeSelect);
-
-            // Create the main embed
-            const embed = new EmbedBuilder()
-                .setColor('#0099FF')
-                .setTitle('📋 Build List')
-                .setDescription('**Step 1:** Select a content type from the dropdown below to see builds.\n**Step 2:** After selecting content type, pick a build from the dropdown to view details.')
-                .addFields(
-                    { name: '📊 Current Filter', value: 'No filter selected yet', inline: false }
+                        .setLabel(ct)
+                        .setDescription(`Show builds for ${ct}`)
+                        .setValue(ct)
+                        .setEmoji('🎯')
                 )
-                .setFooter({ text: 'Phoenix Assistance Bot • Select content type first, then pick a build' })
-                .setTimestamp();
+            ]);
 
-            // Store list data temporarily
-            const listData = {
-                contentType: null,
-                buildName: null,
-                contentTypes: contentTypes // Store content types to avoid refetching
-            };
-            interaction.client.listData = interaction.client.listData || new Map();
-            interaction.client.listData.set(interaction.user.id, listData);
+        const contentTypeRow = new ActionRowBuilder().addComponents(contentTypeSelect);
 
-            // Since we deferred, we should always use editReply
-            await interaction.editReply({
-                embeds: [embed],
-                components: [contentTypeRow]
-            });
-        } catch (error) {
-            console.error('Error in handleList:', error);
-            
-            try {
-                const embed = new EmbedBuilder()
-                    .setColor('#FF0000')
-                    .setTitle('❌ Error')
-                    .setDescription('An error occurred while setting up build list.')
-                    .setFooter({ text: 'Phoenix Assistance Bot' })
-                    .setTimestamp();
-                
-                // Since we deferred, we should always use editReply
-                if (interaction.deferred && !interaction.replied) {
-                    await interaction.editReply({ embeds: [embed] });
-                }
-            } catch (replyError) {
-                console.error('Error sending error message:', replyError);
-            }
-        }
+        // Create the main embed
+        const embed = new EmbedBuilder()
+            .setColor('#0099FF')
+            .setTitle('📋 Build List')
+            .setDescription('**Step 1:** Select a content type from the dropdown below to see builds.\n**Step 2:** After selecting content type, pick a build from the dropdown to view details.')
+            .addFields(
+                { name: '📊 Current Filter', value: 'No filter selected yet', inline: false }
+            )
+            .setFooter({ text: 'Phoenix Assistance Bot • Select content type first, then pick a build' })
+            .setTimestamp();
+
+        // Store list data temporarily
+        const listData = {
+            contentType: null,
+            buildName: null,
+            contentTypes: contentTypes // Store content types to avoid refetching
+        };
+        interaction.client.listData = interaction.client.listData || new Map();
+        interaction.client.listData.set(interaction.user.id, listData);
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [contentTypeRow],
+            ephemeral: true
+        });
     },
 
     async handleListInteraction(interaction, db) {
@@ -955,18 +890,10 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleListInteraction:', error);
             try {
-                // Check if we can reply or need to use followUp
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: '❌ An error occurred while processing your interaction. Please try again.',
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.followUp({
-                        content: '❌ An error occurred while processing your interaction. Please try again.',
-                        ephemeral: true
-                    });
-                }
+                await interaction.reply({
+                    content: '❌ An error occurred while processing your interaction. Please try again.',
+                    ephemeral: true
+                });
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -1196,18 +1123,10 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleDeleteInteraction:', error);
             try {
-                // Check if we can reply or need to use followUp
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: '❌ An error occurred while processing your interaction. Please try again.',
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.followUp({
-                        content: '❌ An error occurred while processing your interaction. Please try again.',
-                        ephemeral: true
-                    });
-                }
+                await interaction.reply({
+                    content: '❌ An error occurred while processing your interaction. Please try again.',
+                    ephemeral: true
+                });
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -1315,18 +1234,10 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleListNameFilterModal:', error);
             try {
-                // Check if we can reply or need to use followUp
-                if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({
-                        content: '❌ An error occurred while processing your name filter. Please try again.',
-                        ephemeral: true
-                    });
-                } else {
-                    await interaction.followUp({
-                        content: '❌ An error occurred while processing your name filter. Please try again.',
-                        ephemeral: true
-                    });
-                }
+                await interaction.reply({
+                    content: '❌ An error occurred while processing your name filter. Please try again.',
+                    ephemeral: true
+                });
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
