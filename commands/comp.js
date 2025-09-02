@@ -946,33 +946,33 @@ module.exports = {
                     // Create the comps display embed
                     const embed = await this.createCompsDisplayEmbed(comps, selectedContentType);
                     
+                    // Create a comp name dropdown if there are comps available
+                    let compNameRow = null;
+                    if (comps.length > 0) {
+                        const compNameSelect = new StringSelectMenuBuilder()
+                            .setCustomId('comp_list_name_select')
+                            .setPlaceholder('Select a comp to view details')
+                            .addOptions(
+                                comps.map((comp, index) => 
+                                    new StringSelectMenuOptionBuilder()
+                                        .setLabel(comp.name)
+                                        .setDescription(`${comp.builds.length} builds | ${comp.contentType}`)
+                                        .setValue(`${comp.name}_${index}`)
+                                        .setEmoji('🎭')
+                                )
+                            );
+
+                        compNameRow = new ActionRowBuilder().addComponents(compNameSelect);
+                    }
+
+                    // Combine all components - only show comp name dropdown, remove content type dropdown
+                    const components = [];
+                    if (compNameRow) {
+                        components.push(compNameRow);
+                    }
+                    
                     // Update the original message with comps and comp name selection
                     try {
-                        // Create a comp name dropdown if there are comps available
-                        let compNameRow = null;
-                        if (comps.length > 0) {
-                            const compNameSelect = new StringSelectMenuBuilder()
-                                .setCustomId('comp_list_name_select')
-                                .setPlaceholder('Select a comp to view details')
-                                .addOptions(
-                                    comps.map((comp, index) => 
-                                        new StringSelectMenuOptionBuilder()
-                                            .setLabel(comp.name)
-                                            .setDescription(`${comp.builds.length} builds | ${comp.contentType}`)
-                                            .setValue(`${comp.name}_${index}`)
-                                            .setEmoji('🎭')
-                                    )
-                                );
-
-                            compNameRow = new ActionRowBuilder().addComponents(compNameSelect);
-                        }
-
-                        // Combine all components - only show comp name dropdown, remove content type dropdown
-                        const components = [];
-                        if (compNameRow) {
-                            components.push(compNameRow);
-                        }
-                        
                         await interaction.update({
                             embeds: [embed],
                             components: components
