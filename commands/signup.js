@@ -47,6 +47,11 @@ module.exports = {
                 .setPlaceholder('Select content type')
                 .addOptions([
                     new StringSelectMenuOptionBuilder()
+                        .setLabel('All Comps')
+                        .setDescription('Show all comps regardless of content type')
+                        .setValue('all')
+                        .setEmoji('📋'),
+                    new StringSelectMenuOptionBuilder()
                         .setLabel('General')
                         .setDescription('General purpose builds')
                         .setValue('General')
@@ -66,7 +71,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#4CAF50')
                 .setTitle('📝 Build Signup')
-                .setDescription('**Step 1:** Choose a content type to see available comps and builds.')
+                .setDescription('**Step 1:** Choose a content type to see available comps and builds.\n\n💡 **Tip:** Choose "All Comps" to see every comp regardless of content type!')
                 .setFooter({ text: 'Phoenix Assistance Bot • Step 1 of 2' })
                 .setTimestamp();
 
@@ -100,7 +105,13 @@ module.exports = {
     async handleContentTypeSelection(interaction, db) {
         try {
             const userId = interaction.user.id;
-            const signupData = interaction.client.signupData?.get(userId) || {};
+            
+            // Ensure signupData Map exists
+            if (!interaction.client.signupData) {
+                interaction.client.signupData = new Map();
+            }
+            
+            const signupData = interaction.client.signupData.get(userId) || {};
             const selectedContentType = interaction.values[0];
 
             console.log(`Content type selected for signup: ${selectedContentType}`);
@@ -111,14 +122,24 @@ module.exports = {
 
             // Get available compositions for the selected content type
             let comps;
-            if (selectedContentType === 'General') {
+            if (selectedContentType === 'all') {
+                // Get all comps regardless of content type
+                comps = await db.getComps(interaction.guildId, 'all');
+                console.log(`Retrieved ${comps.length} comps for 'all' content type`);
+            } else if (selectedContentType === 'General') {
                 comps = await db.getComps(interaction.guildId, null);
+                console.log(`Retrieved ${comps.length} comps for 'General' content type`);
             } else {
                 comps = await db.getComps(interaction.guildId, selectedContentType);
+                console.log(`Retrieved ${comps.length} comps for '${selectedContentType}' content type`);
             }
 
             console.log('Retrieved comps:', comps);
             console.log('Comps array length:', comps?.length);
+            
+            // Filter out any documents that don't have a name field (safety check)
+            const validComps = comps.filter(comp => comp && comp.name && typeof comp.name === 'string');
+            console.log(`Filtered to ${validComps.length} valid comps`);
             
             // Validate comps data
             if (comps && Array.isArray(comps)) {
@@ -129,30 +150,11 @@ module.exports = {
                 });
             }
 
-            if (comps.length === 0) {
-                const embed = new EmbedBuilder()
-                    .setColor('#FFAA00')
-                    .setTitle('📝 Build Signup')
-                    .setDescription(`No compositions found for **${selectedContentType}**.\n\nPlease try a different content type or contact an administrator.`)
-                    .setFooter({ text: 'Phoenix Assistance Bot' })
-                    .setTimestamp();
-
-                await interaction.update({
-                    embeds: [embed],
-                    components: []
-                });
-                return;
-            }
-
-            // Filter out invalid comps and create options
-            const validComps = comps.filter(comp => comp && comp.name && typeof comp.name === 'string');
-            console.log('Valid comps after filtering:', validComps.length);
-            
             if (validComps.length === 0) {
                 const embed = new EmbedBuilder()
                     .setColor('#FFAA00')
                     .setTitle('📝 Build Signup')
-                    .setDescription(`No valid compositions found for **${selectedContentType}**.\n\nAll compositions appear to have invalid data. Please contact an administrator.`)
+                    .setDescription(`No compositions found for **${selectedContentType}**.\n\nPlease try a different content type or contact an administrator.`)
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
 
@@ -205,7 +207,13 @@ module.exports = {
     async handleCompSelection(interaction, db) {
         try {
             const userId = interaction.user.id;
-            const signupData = interaction.client.signupData?.get(userId) || {};
+            
+            // Ensure signupData Map exists
+            if (!interaction.client.signupData) {
+                interaction.client.signupData = new Map();
+            }
+            
+            const signupData = interaction.client.signupData.get(userId) || {};
             const selectedCompName = interaction.values[0];
 
             console.log(`Composition selected for signup: ${selectedCompName}`);
@@ -216,17 +224,28 @@ module.exports = {
 
             // Get the composition details
             let selectedComp;
-            if (signupData.contentType === 'General') {
+            if (signupData.contentType === 'all') {
+                // Get all comps and find the selected one
+                const allComps = await db.getComps(interaction.guildId, 'all');
+                console.log(`Looking for comp '${selectedCompName}' in ${allComps.length} all comps`);
+                if (allComps && Array.isArray(allComps)) {
+                    selectedComp = allComps.find(comp => comp && comp.name && typeof comp.name === 'string' && comp.name === selectedCompName);
+                }
+            } else if (signupData.contentType === 'General') {
                 const generalComps = await db.getComps(interaction.guildId, null);
+                console.log(`Looking for comp '${selectedCompName}' in ${generalComps.length} general comps`);
                 if (generalComps && Array.isArray(generalComps)) {
                     selectedComp = generalComps.find(comp => comp && comp.name && typeof comp.name === 'string' && comp.name === selectedCompName);
                 }
             } else {
                 const contentTypeComps = await db.getComps(interaction.guildId, signupData.contentType);
+                console.log(`Looking for comp '${selectedCompName}' in ${contentTypeComps.length} '${signupData.contentType}' comps`);
                 if (contentTypeComps && Array.isArray(contentTypeComps)) {
                     selectedComp = contentTypeComps.find(comp => comp && comp.name && typeof comp.name === 'string' && comp.name === selectedCompName);
                 }
             }
+            
+            console.log(`Selected comp found:`, selectedComp ? selectedComp.name : 'None');
 
             if (!selectedComp || !selectedComp.builds || selectedComp.builds.length === 0) {
                 const embed = new EmbedBuilder()
@@ -419,6 +438,11 @@ module.exports = {
             if (!interaction.client.eventSignups) {
                 interaction.client.eventSignups = new Map();
             }
+            
+            // Ensure signupData Map exists
+            if (!interaction.client.signupData) {
+                interaction.client.signupData = new Map();
+            }
 
             const customId = interaction.customId;
             const parts = customId.split('_');
@@ -435,15 +459,23 @@ module.exports = {
             
             // Get the composition details
             let selectedComp = null;
-            const generalComps = await db.getComps(interaction.guildId, null);
             
-            // Validate general comps data
-            if (generalComps && Array.isArray(generalComps)) {
-                selectedComp = generalComps.find(comp => comp && comp.name && typeof comp.name === 'string' && comp.name === compName);
+            // First try to find in all comps (most efficient)
+            const allComps = await db.getComps(interaction.guildId, 'all');
+            if (allComps && Array.isArray(allComps)) {
+                selectedComp = allComps.find(comp => comp && comp.name && typeof comp.name === 'string' && comp.name === compName);
             }
             
             if (!selectedComp) {
-                // Try to find in content type comps
+                // Fallback: try to find in general comps
+                const generalComps = await db.getComps(interaction.guildId, null);
+                if (generalComps && Array.isArray(generalComps)) {
+                    selectedComp = generalComps.find(comp => comp && comp.name && typeof comp.name === 'string' && comp.name === compName);
+                }
+            }
+            
+            if (!selectedComp) {
+                // Fallback: try to find in content type comps
                 const contentTypes = await db.getContentTypes(interaction.guildId);
                 for (const contentType of contentTypes) {
                     const contentTypeComps = await db.getComps(interaction.guildId, contentType);
