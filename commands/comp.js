@@ -916,7 +916,7 @@ module.exports = {
                     let comps;
                     if (selectedContentType === 'all') {
                         // Get all comps regardless of content type
-                        comps = await db.getAllComps(interaction.guildId);
+                        comps = await db.getComps(interaction.guildId, 'all');
                     } else {
                         // Get comps filtered by content type
                         comps = await db.getComps(interaction.guildId, selectedContentType);
@@ -991,7 +991,7 @@ module.exports = {
                     // Get the specific comp details
                     let comps;
                     if (listData.contentType === 'all') {
-                        comps = await db.getAllComps(interaction.guildId);
+                        comps = await db.getComps(interaction.guildId, 'all');
                     } else {
                         comps = await db.getComps(interaction.guildId, listData.contentType);
                     }
