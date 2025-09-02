@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "deploy": "node deploy-commands.js"
+    "deploy": "node deploy-commands.js",
+    "start:deploy": "node deploy-commands.js && node index.js",
+    "start:auto": "node start-with-deploy.js"
   },
   "keywords": ["discord", "bot", "albion", "mongodb", "gaming"],
   "author": "Your Name",
