@@ -172,7 +172,13 @@ module.exports = {
     async handleButtonInteraction(interaction, db) {
         try {
             const userId = interaction.user.id;
-            const compData = interaction.client.compData?.get(userId) || {};
+            
+            // Ensure compData Map exists
+            if (!interaction.client.compData) {
+                interaction.client.compData = new Map();
+            }
+            
+            const compData = interaction.client.compData.get(userId) || {};
 
             console.log(`Comp interaction: ${interaction.customId} by user ${userId}`);
             console.log('Current comp data:', compData);
@@ -298,7 +304,13 @@ module.exports = {
     async handleModalSubmit(interaction, db) {
         try {
             const userId = interaction.user.id;
-            const compData = interaction.client.compData?.get(userId) || {};
+            
+            // Ensure compData Map exists
+            if (!interaction.client.compData) {
+                interaction.client.compData = new Map();
+            }
+            
+            const compData = interaction.client.compData.get(userId) || {};
             
             // Extract the field name from the modal custom ID
             const field = interaction.customId.replace('comp_modal_', '');
@@ -900,7 +912,13 @@ module.exports = {
     async handleListInteraction(interaction, db) {
         try {
             const userId = interaction.user.id;
-            const listData = interaction.client.compListData?.get(userId) || {};
+            
+            // Ensure compListData Map exists
+            if (!interaction.client.compListData) {
+                interaction.client.compListData = new Map();
+            }
+            
+            const listData = interaction.client.compListData.get(userId) || {};
 
             console.log(`Comp list interaction: ${interaction.customId} by user ${userId}`);
 
@@ -1088,7 +1106,13 @@ module.exports = {
     async handleDeleteInteraction(interaction, db) {
         try {
             const userId = interaction.user.id;
-            const deleteData = interaction.client.compDeleteData?.get(userId) || {};
+            
+            // Ensure compDeleteData Map exists
+            if (!interaction.client.compDeleteData) {
+                interaction.client.compDeleteData = new Map();
+            }
+            
+            const deleteData = interaction.client.compDeleteData.get(userId) || {};
 
             console.log(`Comp delete interaction: ${interaction.customId} by user ${userId}`);
 
