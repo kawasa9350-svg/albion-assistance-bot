@@ -743,7 +743,11 @@ module.exports = {
             .setCustomId('comp_list_content_type_select')
             .setPlaceholder('Select content type to view comps')
             .addOptions([
-
+                new StringSelectMenuOptionBuilder()
+                    .setLabel('All Comps')
+                    .setDescription('Show all comps regardless of content type')
+                    .setValue('all')
+                    .setEmoji('📋'),
                 new StringSelectMenuOptionBuilder()
                     .setLabel('General')
                     .setDescription('Show only general comps')
@@ -764,7 +768,7 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setColor('#9B59B6')
             .setTitle('📋 Comp List')
-            .setDescription('**Step 1:** Select a content type from the dropdown below to see comps for that type.\n**Step 2:** After selecting content type, pick a comp from the dropdown to view details.')
+            .setDescription('**Step 1:** Select a content type from the dropdown below to see comps for that type.\n**Step 2:** After selecting content type, pick a comp from the dropdown to view details.\n\n💡 **Tip:** Choose "All Comps" to see every comp regardless of content type!')
             .addFields(
                 { name: '📊 Current Filter', value: 'No content type selected yet', inline: false }
             )
@@ -908,8 +912,15 @@ module.exports = {
                     listData.contentType = selectedContentType;
                     interaction.client.compListData.set(userId, listData);
 
-                    // Get comps based on selection (you'll need to implement this method in database.js)
-                    let comps = await db.getComps(interaction.guildId, selectedContentType);
+                    // Get comps based on selection
+                    let comps;
+                    if (selectedContentType === 'all') {
+                        // Get all comps regardless of content type
+                        comps = await db.getAllComps(interaction.guildId);
+                    } else {
+                        // Get comps filtered by content type
+                        comps = await db.getComps(interaction.guildId, selectedContentType);
+                    }
 
                     // Create the comps display embed
                     const embed = await this.createCompsDisplayEmbed(comps, selectedContentType);
@@ -978,7 +989,12 @@ module.exports = {
                     console.log('Extracted comp name:', selectedCompName);
                     
                     // Get the specific comp details
-                    let comps = await db.getComps(interaction.guildId, listData.contentType);
+                    let comps;
+                    if (listData.contentType === 'all') {
+                        comps = await db.getAllComps(interaction.guildId);
+                    } else {
+                        comps = await db.getComps(interaction.guildId, listData.contentType);
+                    }
                     
                     if (comps.length > 0) {
                         const selectedComp = comps.find(comp => comp.name === selectedCompName);
@@ -1329,8 +1345,10 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            if (contentType) {
+            if (contentType && contentType !== 'all') {
                 embed.addFields({ name: '🔍 Current Filter', value: `Content Type: ${contentType}`, inline: true });
+            } else if (contentType === 'all') {
+                embed.addFields({ name: '🔍 Current Filter', value: 'All Content Types', inline: true });
             }
 
             return embed;
@@ -1344,8 +1362,10 @@ module.exports = {
             .setTimestamp();
 
         // Add filter information
-        if (contentType) {
+        if (contentType && contentType !== 'all') {
             embed.addFields({ name: '🔍 Content Type Filter', value: contentType, inline: true });
+        } else if (contentType === 'all') {
+            embed.addFields({ name: '🔍 Current Filter', value: 'All Content Types', inline: true });
         }
 
         // Split comps into chunks to avoid embed field limit
