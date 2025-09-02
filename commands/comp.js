@@ -943,17 +943,21 @@ module.exports = {
                     console.log(`Retrieved ${comps.length} comps for content type: ${selectedContentType}`);
                     console.log('Comps data:', comps);
 
+                    // Filter out any documents that don't have a name field (safety check)
+                    const validComps = comps.filter(comp => comp.name && typeof comp.name === 'string');
+                    console.log(`Filtered to ${validComps.length} valid comps`);
+
                     // Create the comps display embed
-                    const embed = await this.createCompsDisplayEmbed(comps, selectedContentType);
+                    const embed = await this.createCompsDisplayEmbed(validComps, selectedContentType);
                     
                     // Create a comp name dropdown if there are comps available
                     let compNameRow = null;
-                    if (comps.length > 0) {
+                    if (validComps.length > 0) {
                         const compNameSelect = new StringSelectMenuBuilder()
                             .setCustomId('comp_list_name_select')
                             .setPlaceholder('Select a comp to view details')
                             .addOptions(
-                                comps.map((comp, index) => 
+                                validComps.map((comp, index) => 
                                     new StringSelectMenuOptionBuilder()
                                         .setLabel(comp.name)
                                         .setDescription(`${comp.builds.length} builds | ${comp.contentType}`)
