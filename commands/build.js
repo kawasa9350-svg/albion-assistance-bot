@@ -49,18 +49,28 @@ module.exports = {
                     await this.handleList(interaction, db);
                     break;
                 default:
-                    await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
+                    if (!interaction.replied && !interaction.deferred) {
+                        await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
+                    }
             }
         } catch (error) {
             console.error('Error in build command:', error);
-            const embed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('❌ Error')
-                .setDescription('An error occurred while processing the build command.')
-                .setFooter({ text: 'Phoenix Assistance Bot' })
-                .setTimestamp();
             
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            // Only reply if we haven't already replied or deferred
+            if (!interaction.replied && !interaction.deferred) {
+                try {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setTitle('❌ Error')
+                        .setDescription('An error occurred while processing the build command.')
+                        .setFooter({ text: 'Phoenix Assistance Bot' })
+                        .setTimestamp();
+                    
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                } catch (replyError) {
+                    console.error('Error sending error message:', replyError);
+                }
+            }
         }
     },
 
@@ -676,61 +686,94 @@ module.exports = {
     },
 
     async handleList(interaction, db) {
-        // Get available content types for the dropdown
-        const contentTypes = await db.getContentTypes(interaction.guildId);
-        console.log('Available content types for list:', contentTypes);
+        try {
+            // Defer the reply immediately to prevent timeout
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.deferReply({ ephemeral: true });
+            }
 
-        // Create content type dropdown
-        const contentTypeSelect = new StringSelectMenuBuilder()
-            .setCustomId('list_content_type_select')
-            .setPlaceholder('Select content type to filter builds')
-            .addOptions([
-                new StringSelectMenuOptionBuilder()
-                    .setLabel('All Builds')
-                    .setDescription('Show all builds regardless of content type')
-                    .setValue('all')
-                    .setEmoji('📋'),
-                new StringSelectMenuOptionBuilder()
-                    .setLabel('General')
-                    .setDescription('Show only general builds')
-                    .setValue('General')
-                    .setEmoji('📄'),
-                ...contentTypes.map(ct => 
+            // Get available content types for the dropdown
+            const contentTypes = await db.getContentTypes(interaction.guildId);
+            console.log('Available content types for list:', contentTypes);
+
+            // Create content type dropdown
+            const contentTypeSelect = new StringSelectMenuBuilder()
+                .setCustomId('list_content_type_select')
+                .setPlaceholder('Select content type to filter builds')
+                .addOptions([
                     new StringSelectMenuOptionBuilder()
-                        .setLabel(ct)
-                        .setDescription(`Show builds for ${ct}`)
-                        .setValue(ct)
-                        .setEmoji('🎯')
+                        .setLabel('All Builds')
+                        .setDescription('Show all builds regardless of content type')
+                        .setValue('all')
+                        .setEmoji('📋'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('General')
+                        .setDescription('Show only general builds')
+                        .setValue('General')
+                        .setEmoji('📄'),
+                    ...contentTypes.map(ct => 
+                        new StringSelectMenuOptionBuilder()
+                            .setLabel(ct)
+                            .setDescription(`Show builds for ${ct}`)
+                            .setValue(ct)
+                            .setEmoji('🎯')
+                    )
+                ]);
+
+            const contentTypeRow = new ActionRowBuilder().addComponents(contentTypeSelect);
+
+            // Create the main embed
+            const embed = new EmbedBuilder()
+                .setColor('#0099FF')
+                .setTitle('📋 Build List')
+                .setDescription('**Step 1:** Select a content type from the dropdown below to see builds.\n**Step 2:** After selecting content type, pick a build from the dropdown to view details.')
+                .addFields(
+                    { name: '📊 Current Filter', value: 'No filter selected yet', inline: false }
                 )
-            ]);
+                .setFooter({ text: 'Phoenix Assistance Bot • Select content type first, then pick a build' })
+                .setTimestamp();
 
-        const contentTypeRow = new ActionRowBuilder().addComponents(contentTypeSelect);
+            // Store list data temporarily
+            const listData = {
+                contentType: null,
+                buildName: null,
+                contentTypes: contentTypes // Store content types to avoid refetching
+            };
+            interaction.client.listData = interaction.client.listData || new Map();
+            interaction.client.listData.set(interaction.user.id, listData);
 
-        // Create the main embed
-        const embed = new EmbedBuilder()
-            .setColor('#0099FF')
-            .setTitle('📋 Build List')
-            .setDescription('**Step 1:** Select a content type from the dropdown below to see builds.\n**Step 2:** After selecting content type, pick a build from the dropdown to view details.')
-            .addFields(
-                { name: '📊 Current Filter', value: 'No filter selected yet', inline: false }
-            )
-            .setFooter({ text: 'Phoenix Assistance Bot • Select content type first, then pick a build' })
-            .setTimestamp();
-
-        // Store list data temporarily
-        const listData = {
-            contentType: null,
-            buildName: null,
-            contentTypes: contentTypes // Store content types to avoid refetching
-        };
-        interaction.client.listData = interaction.client.listData || new Map();
-        interaction.client.listData.set(interaction.user.id, listData);
-
-        await interaction.reply({
-            embeds: [embed],
-            components: [contentTypeRow],
-            ephemeral: true
-        });
+            if (interaction.deferred) {
+                await interaction.editReply({
+                    embeds: [embed],
+                    components: [contentTypeRow]
+                });
+            } else if (!interaction.replied) {
+                await interaction.reply({
+                    embeds: [embed],
+                    components: [contentTypeRow],
+                    ephemeral: true
+                });
+            }
+        } catch (error) {
+            console.error('Error in handleList:', error);
+            
+            try {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Error')
+                    .setDescription('An error occurred while setting up build list.')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                if (interaction.deferred) {
+                    await interaction.editReply({ embeds: [embed] });
+                } else if (!interaction.replied) {
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                }
+            } catch (replyError) {
+                console.error('Error sending error message:', replyError);
+            }
+        }
     },
 
     async handleListInteraction(interaction, db) {
