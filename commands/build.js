@@ -70,6 +70,20 @@ module.exports = {
                 } catch (replyError) {
                     console.error('Error sending error message:', replyError);
                 }
+            } else if (interaction.deferred && !interaction.replied) {
+                // If we deferred but haven't replied yet, use editReply
+                try {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setTitle('❌ Error')
+                        .setDescription('An error occurred while processing the build command.')
+                        .setFooter({ text: 'Phoenix Assistance Bot' })
+                        .setTimestamp();
+                    
+                    await interaction.editReply({ embeds: [embed] });
+                } catch (replyError) {
+                    console.error('Error sending error message:', replyError);
+                }
             }
         }
     },
@@ -353,10 +367,18 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleButtonInteraction:', error);
             try {
-                await interaction.reply({
-                    content: '❌ An error occurred while processing your interaction. Please try again.',
-                    ephemeral: true
-                });
+                // Check if we can reply or need to use followUp
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ An error occurred while processing your interaction. Please try again.',
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.followUp({
+                        content: '❌ An error occurred while processing your interaction. Please try again.',
+                        ephemeral: true
+                    });
+                }
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -431,10 +453,18 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleModalSubmit:', error);
             try {
-                await interaction.reply({
-                    content: '❌ An error occurred while processing your input. Please try again.',
-                    ephemeral: true
-                });
+                // Check if we can reply or need to use followUp
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ An error occurred while processing your input. Please try again.',
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.followUp({
+                        content: '❌ An error occurred while processing your input. Please try again.',
+                        ephemeral: true
+                    });
+                }
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -742,18 +772,11 @@ module.exports = {
             interaction.client.listData = interaction.client.listData || new Map();
             interaction.client.listData.set(interaction.user.id, listData);
 
-            if (interaction.deferred) {
-                await interaction.editReply({
-                    embeds: [embed],
-                    components: [contentTypeRow]
-                });
-            } else if (!interaction.replied) {
-                await interaction.reply({
-                    embeds: [embed],
-                    components: [contentTypeRow],
-                    ephemeral: true
-                });
-            }
+            // Since we deferred, we should always use editReply
+            await interaction.editReply({
+                embeds: [embed],
+                components: [contentTypeRow]
+            });
         } catch (error) {
             console.error('Error in handleList:', error);
             
@@ -765,10 +788,9 @@ module.exports = {
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
                 
-                if (interaction.deferred) {
+                // Since we deferred, we should always use editReply
+                if (interaction.deferred && !interaction.replied) {
                     await interaction.editReply({ embeds: [embed] });
-                } else if (!interaction.replied) {
-                    await interaction.reply({ embeds: [embed], ephemeral: true });
                 }
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
@@ -933,10 +955,18 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleListInteraction:', error);
             try {
-                await interaction.reply({
-                    content: '❌ An error occurred while processing your interaction. Please try again.',
-                    ephemeral: true
-                });
+                // Check if we can reply or need to use followUp
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ An error occurred while processing your interaction. Please try again.',
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.followUp({
+                        content: '❌ An error occurred while processing your interaction. Please try again.',
+                        ephemeral: true
+                    });
+                }
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -1166,10 +1196,18 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleDeleteInteraction:', error);
             try {
-                await interaction.reply({
-                    content: '❌ An error occurred while processing your interaction. Please try again.',
-                    ephemeral: true
-                });
+                // Check if we can reply or need to use followUp
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ An error occurred while processing your interaction. Please try again.',
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.followUp({
+                        content: '❌ An error occurred while processing your interaction. Please try again.',
+                        ephemeral: true
+                    });
+                }
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
@@ -1277,10 +1315,18 @@ module.exports = {
         } catch (error) {
             console.error('Error in handleListNameFilterModal:', error);
             try {
-                await interaction.reply({
-                    content: '❌ An error occurred while processing your name filter. Please try again.',
-                    ephemeral: true
-                });
+                // Check if we can reply or need to use followUp
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({
+                        content: '❌ An error occurred while processing your name filter. Please try again.',
+                        ephemeral: true
+                    });
+                } else {
+                    await interaction.followUp({
+                        content: '❌ An error occurred while processing your name filter. Please try again.',
+                        ephemeral: true
+                    });
+                }
             } catch (replyError) {
                 console.error('Error sending error message:', replyError);
             }
