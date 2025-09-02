@@ -647,6 +647,26 @@ client.handleSelectMenuInteraction = async (interaction) => {
         } else {
             console.error('Comp command or handleListInteraction method not found');
         }
+    } else if (customId === 'comp_lock_content_type_select') {
+        console.log('Comp lock content type select menu detected, routing to comp command');
+        
+        // This is a comp lock content type selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleLockInteraction) {
+            await compCommand.handleLockInteraction(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleLockInteraction method not found');
+        }
+    } else if (customId === 'comp_lock_comp_select') {
+        console.log('Comp lock comp select menu detected, routing to comp command');
+        
+        // This is a comp lock comp selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleLockCompSelection) {
+            await compCommand.handleLockCompSelection(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleLockCompSelection method not found');
+        }
     } else if (customId === 'comp_delete_content_type_select') {
         console.log('Comp delete content type select menu detected, routing to comp command');
         

@@ -462,7 +462,8 @@ class DatabaseManager {
                 contentType: compData.contentType,
                 builds: compData.builds,
                 createdBy: compData.createdBy,
-                createdAt: compData.createdAt
+                createdAt: compData.createdAt,
+                lockView: compData.lockView !== undefined ? compData.lockView : true // Default to true (viewable)
             };
             
             const result = await collection.insertOne(comp);
@@ -479,21 +480,22 @@ class DatabaseManager {
             const collection = await this.getGuildCollection(guildId);
             console.log(`📋 Getting compositions for guild ${guildId}, content type: ${contentType}`);
             
-            // Query for both old compositions (without type) and new ones (with type: 'composition')
+            // Query for compositions only (exclude the main guild document)
             let query = { 
                 guildId: guildId,
-                $or: [
-                    { type: 'composition' },           // New compositions with type field
-                    { type: { $exists: false } }       // Old compositions without type field
-                ]
+                type: 'composition',  // Only get documents with type: 'composition'
+                name: { $exists: true }  // Ensure the document has a name field (compositions have names, guild doc doesn't)
             };
             
             if (contentType && contentType !== 'all') {
                 query.contentType = contentType;
             }
             
+            console.log('Database query:', JSON.stringify(query, null, 2));
+            
             const comps = await collection.find(query).toArray();
             console.log(`Found ${comps.length} compositions`);
+            console.log('Compositions found:', comps.map(comp => ({ name: comp.name, contentType: comp.contentType, type: comp.type })));
             return comps;
         } catch (error) {
             console.error('❌ Failed to get compositions:', error);
@@ -515,6 +517,30 @@ class DatabaseManager {
             return result.deletedCount > 0;
         } catch (error) {
             console.error('❌ Failed to delete composition:', error);
+            return false;
+        }
+    }
+
+    async updateCompLockView(guildId, compName, lockView) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            console.log(`🔒 Updating lockView for composition: ${compName} to ${lockView} in guild ${guildId}`);
+            
+            const result = await collection.updateOne(
+                { 
+                    guildId: guildId, 
+                    name: compName,
+                    type: 'composition'
+                },
+                { 
+                    $set: { lockView: lockView } 
+                }
+            );
+            
+            console.log('Update lockView result:', result);
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('❌ Failed to update composition lockView:', error);
             return false;
         }
     }
