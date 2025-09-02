@@ -3,7 +3,7 @@ services:
     name: albion-assistance-bot
     env: node
     plan: free
-    buildCommand: npm ci --only=production
+    buildCommand: npm install --production
     startCommand: npm start
     envVars:
       - key: NODE_ENV
