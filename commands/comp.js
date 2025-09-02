@@ -15,7 +15,11 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('delete')
-                .setDescription('Delete a comp interactively')),
+                .setDescription('Delete a comp interactively'))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('lock')
+                .setDescription('Toggle build details visibility for a comp')),
 
     async execute(interaction, db) {
         try {
@@ -42,6 +46,9 @@ module.exports = {
                     break;
                 case 'delete':
                     await this.handleDelete(interaction, db);
+                    break;
+                case 'lock':
+                    await this.handleLock(interaction, db);
                     break;
                 default:
                     await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
@@ -1046,38 +1053,52 @@ module.exports = {
                                 detailedEmbed.addFields({ name: '📅 Created', value: createdDate, inline: true });
                             }
                             
-                            // Create build detail buttons for each build
-                            const buildButtons = [];
-                            const buildsPerRow = 4; // Show 4 builds per row
-                            const maxRows = 5; // Discord limit
-                            const maxBuilds = maxRows * buildsPerRow; // 20 builds maximum
+                            // Check if build details are viewable (lockView field)
+                            const isViewable = selectedComp.lockView !== false; // Default to true if not set
+                            console.log(`Comp "${selectedComp.name}" lockView: ${selectedComp.lockView}, isViewable: ${isViewable}`);
                             
-                            // If we have more builds than can fit, truncate and add a note
-                            const buildsToShow = selectedComp.builds.slice(0, maxBuilds);
+                            let buildButtons = [];
                             
-                            for (let i = 0; i < buildsToShow.length; i += buildsPerRow) {
-                                const row = new ActionRowBuilder();
-                                const rowBuilds = buildsToShow.slice(i, i + buildsPerRow);
+                            if (isViewable) {
+                                // Create build detail buttons for each build
+                                const buildsPerRow = 4; // Show 4 builds per row
+                                const maxRows = 5; // Discord limit
+                                const maxBuilds = maxRows * buildsPerRow; // 20 builds maximum
                                 
-                                rowBuilds.forEach((buildName, rowIndex) => {
-                                    const globalIndex = i + rowIndex; // Global index across all rows
-                                    const button = new ButtonBuilder()
-                                        .setCustomId(`comp_build_detail_${globalIndex}_${buildName}`)
-                                        .setLabel(`${globalIndex + 1}. ${buildName}`)
-                                        .setStyle(ButtonStyle.Secondary)
-                                        .setEmoji('⚔️');
-                                    row.addComponents(button);
+                                // If we have more builds than can fit, truncate and add a note
+                                const buildsToShow = selectedComp.builds.slice(0, maxBuilds);
+                                
+                                for (let i = 0; i < buildsToShow.length; i += buildsPerRow) {
+                                    const row = new ActionRowBuilder();
+                                    const rowBuilds = buildsToShow.slice(i, i + buildsPerRow);
+                                    
+                                    rowBuilds.forEach((buildName, rowIndex) => {
+                                        const globalIndex = i + rowIndex; // Global index across all rows
+                                        const button = new ButtonBuilder()
+                                            .setCustomId(`comp_build_detail_${globalIndex}_${buildName}`)
+                                            .setLabel(`${globalIndex + 1}. ${buildName}`)
+                                            .setStyle(ButtonStyle.Secondary)
+                                            .setEmoji('⚔️');
+                                        row.addComponents(button);
+                                    });
+                                    
+                                    buildButtons.push(row);
+                                }
+                                
+                                // If we had to truncate, add a note about it
+                                if (selectedComp.builds.length > maxBuilds) {
+                                    console.warn(`Too many builds (${selectedComp.builds.length}) for comp detail interface. Showing only first ${maxBuilds} builds.`);
+                                }
+                            } else {
+                                // Build details are locked - add a note to the embed
+                                detailedEmbed.addFields({
+                                    name: '🔒 Build Details Locked',
+                                    value: 'Build details are not available for this composition.',
+                                    inline: false
                                 });
-                                
-                                buildButtons.push(row);
                             }
                             
-                            // If we had to truncate, add a note about it
-                            if (selectedComp.builds.length > maxBuilds) {
-                                console.warn(`Too many builds (${selectedComp.builds.length}) for comp detail interface. Showing only first ${maxBuilds} builds.`);
-                            }
-                            
-                            // Update the message with detailed comp view and build detail buttons
+                            // Update the message with detailed comp view and build detail buttons (if viewable)
                             await interaction.update({
                                 embeds: [detailedEmbed],
                                 components: buildButtons
@@ -1425,5 +1446,115 @@ module.exports = {
             chunks.push(array.slice(i, i + size));
         }
         return chunks;
+    },
+
+    async handleLock(interaction, db) {
+        // Check if user has permission
+        const member = interaction.member;
+        let hasPermission = false;
+        
+        // Check if user is admin
+        if (member.permissions.has('Administrator')) {
+            hasPermission = true;
+            console.log(`User ${interaction.user.id} has Administrator permission`);
+        } else {
+            // Check if user has comp permission directly
+            try {
+                const userHasPermission = await db.hasPermission(interaction.guildId, member.id, 'comp');
+                if (userHasPermission) {
+                    hasPermission = true;
+                    console.log(`User ${interaction.user.id} has direct comp permission`);
+                }
+            } catch (error) {
+                console.error('Error checking user permission:', error);
+            }
+            
+            // Check if any of user's roles have comp permission
+            if (!hasPermission) {
+                for (const role of member.roles.cache.values()) {
+                    try {
+                        const roleHasPermission = await db.hasPermission(interaction.guildId, role.id, 'comp');
+                        if (roleHasPermission) {
+                            hasPermission = true;
+                            console.log(`User ${interaction.user.id} has comp permission through role: ${role.name}`);
+                            break;
+                        }
+                    } catch (error) {
+                        console.error(`Error checking role ${role.id} permission:`, error);
+                    }
+                }
+            }
+        }
+
+        if (!hasPermission) {
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Permission Denied')
+                .setDescription('You do not have permission to manage comp lock settings.\n\n**Required:** Administrator role or comp permission')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Get available content types for the dropdown
+        const contentTypes = await db.getContentTypes(interaction.guildId);
+        console.log('Available content types for comp lock:', contentTypes);
+
+        // Ensure content types are unique and filter out any duplicates
+        const uniqueContentTypes = [...new Set(contentTypes)].filter(ct => ct && typeof ct === 'string' && ct.trim() !== '');
+        console.log('Unique content types after filtering:', uniqueContentTypes);
+
+        // Create content type dropdown
+        const contentTypeSelect = new StringSelectMenuBuilder()
+            .setCustomId('comp_lock_content_type_select')
+            .setPlaceholder('Select content type to manage comp locks')
+            .addOptions([
+                new StringSelectMenuOptionBuilder()
+                    .setLabel('All Comps')
+                    .setDescription('Manage locks for all comps')
+                    .setValue('all')
+                    .setEmoji('📋'),
+                new StringSelectMenuOptionBuilder()
+                    .setLabel('General')
+                    .setDescription('Manage locks for general comps')
+                    .setValue('General')
+                    .setEmoji('📄'),
+                ...uniqueContentTypes.filter(ct => ct !== 'General').map(ct => 
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel(ct)
+                        .setDescription(`Manage locks for ${ct} comps`)
+                        .setValue(ct)
+                        .setEmoji('🎯')
+                )
+            ]);
+
+        const contentTypeRow = new ActionRowBuilder().addComponents(contentTypeSelect);
+
+        // Create the main embed
+        const embed = new EmbedBuilder()
+            .setColor('#FFAA00')
+            .setTitle('🔒 Comp Lock Management')
+            .setDescription('**Step 1:** Select a content type to see comps for lock management.\n**Step 2:** After selecting content type, pick a comp to toggle its lock status.\n\n💡 **Tip:** Locked comps hide build details from users!')
+            .addFields(
+                { name: '📊 Current Filter', value: 'No content type selected yet', inline: false }
+            )
+            .setFooter({ text: 'Phoenix Assistance Bot • Select content type first, then pick a comp from that type' })
+            .setTimestamp();
+
+        // Store lock data temporarily
+        const lockData = {
+            contentType: null,
+            compName: null,
+            contentTypes: contentTypes
+        };
+        interaction.client.compLockData = interaction.client.compLockData || new Map();
+        interaction.client.compLockData.set(interaction.user.id, lockData);
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [contentTypeRow],
+            ephemeral: true
+        });
     }
 };
