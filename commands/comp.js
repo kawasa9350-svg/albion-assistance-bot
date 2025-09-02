@@ -51,18 +51,28 @@ module.exports = {
                     await this.handleLock(interaction, db);
                     break;
                 default:
-                    await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
+                    if (!interaction.replied && !interaction.deferred) {
+                        await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
+                    }
             }
         } catch (error) {
             console.error('Error in comp command:', error);
-            const embed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('❌ Error')
-                .setDescription('An error occurred while processing the comp command.')
-                .setFooter({ text: 'Phoenix Assistance Bot' })
-                .setTimestamp();
             
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            // Only reply if we haven't already replied or deferred
+            if (!interaction.replied && !interaction.deferred) {
+                try {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setTitle('❌ Error')
+                        .setDescription('An error occurred while processing the comp command.')
+                        .setFooter({ text: 'Phoenix Assistance Bot' })
+                        .setTimestamp();
+                    
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                } catch (replyError) {
+                    console.error('Error sending error message:', replyError);
+                }
+            }
         }
     },
 
@@ -1494,7 +1504,10 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
             
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+            if (!interaction.replied && !interaction.deferred) {
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+            return;
         }
 
         // Get available content types for the dropdown
@@ -1551,10 +1564,12 @@ module.exports = {
         interaction.client.compLockData = interaction.client.compLockData || new Map();
         interaction.client.compLockData.set(interaction.user.id, lockData);
 
-        await interaction.reply({
-            embeds: [embed],
-            components: [contentTypeRow],
-            ephemeral: true
-        });
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({
+                embeds: [embed],
+                components: [contentTypeRow],
+                ephemeral: true
+            });
+        }
     }
 };
