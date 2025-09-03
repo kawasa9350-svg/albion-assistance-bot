@@ -494,7 +494,7 @@ client.handleButtonInteraction = async (interaction) => {
         // This is a leaderboard button
         const leaderboardCommand = client.commands.get('leaderboard');
         if (leaderboardCommand && leaderboardCommand.handleButtonInteraction) {
-            await leaderboardCommand.handleButtonInteraction(interaction, client.dbManager);
+            await leaderboardCommand.handleButtonInteraction(interaction, leaderboardCommand.dbManager);
         } else {
             console.error('Leaderboard command or handleButtonInteraction method not found');
         }

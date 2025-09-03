@@ -298,8 +298,6 @@ module.exports = {
         await interaction.reply({ embeds: [embed] });
     },
 
-
-
     async handleButtonInteraction(interaction, db) {
         try {
             if (interaction.customId === 'confirm_wipe_attendance') {

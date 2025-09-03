@@ -1003,9 +1003,6 @@ class DatabaseManager {
                 });
             }
             
-            // Sort by attendance (highest first)
-            attendanceData.sort((a, b) => b.attendance - a.attendance);
-            
             return attendanceData;
         } catch (error) {
             console.error('❌ Failed to get all user attendance:', error);

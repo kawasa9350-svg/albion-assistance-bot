@@ -220,7 +220,42 @@ module.exports = {
                 if (shouldUpdate) {
                     // Re-fetch data if type changed
                     if (i.customId === 'leaderboard_balance' || i.customId === 'leaderboard_attendance') {
-                        await this.showLeaderboard(interaction, db, type);
+                        // Re-fetch data for the new type
+                        let newData;
+                        if (type === 'balance') {
+                            newData = await db.getAllUserBalances(interaction.guildId);
+                        } else {
+                            newData = await db.getAllUserAttendance(interaction.guildId);
+                        }
+                        
+                        // Update the data and reset pagination
+                        data = newData;
+                        currentPage = 0;
+                        
+                        // Sort users (highest first)
+                        const sortedUsers = data.sort((a, b) => {
+                            const aValue = type === 'balance' ? a.balance : a.attendance;
+                            const bValue = type === 'balance' ? b.balance : b.attendance;
+                            return bValue - aValue;
+                        });
+                        
+                        // Calculate total
+                        const total = sortedUsers.reduce((sum, user) => {
+                            const value = type === 'balance' ? user.balance : user.attendance;
+                            return sum + value;
+                        }, 0);
+                        
+                        // Update pagination settings
+                        const totalPages = Math.ceil(sortedUsers.length / usersPerPage);
+                        
+                        // Create new embed and rows
+                        const updatedEmbed = createLeaderboardEmbed(currentPage);
+                        const updatedRows = createNavigationRows();
+
+                        await i.update({
+                            embeds: [updatedEmbed],
+                            components: updatedRows
+                        });
                         return;
                     }
 
@@ -292,7 +327,15 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
             
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            try {
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                } else {
+                    await interaction.followUp({ embeds: [embed], ephemeral: true });
+                }
+            } catch (replyError) {
+                console.error('Error sending error message:', replyError);
+            }
         }
     },
 
@@ -304,12 +347,9 @@ module.exports = {
                 return;
             }
 
-            // Handle leaderboard type switching
-            if (interaction.customId === 'leaderboard_balance') {
-                await this.showLeaderboard(interaction, db, 'balance');
-            } else if (interaction.customId === 'leaderboard_attendance') {
-                await this.showLeaderboard(interaction, db, 'attendance');
-            }
+            // This method should not be called for leaderboard buttons anymore
+            // as they are handled by the collector in showLeaderboard
+            console.log('Leaderboard button interaction handled by collector, no action needed');
         } catch (error) {
             console.error('Error in leaderboard button interaction:', error);
             try {
