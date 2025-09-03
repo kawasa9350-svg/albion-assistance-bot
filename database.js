@@ -1008,6 +1008,64 @@ class DatabaseManager {
             return [];
         }
     }
+
+    async addAttendanceToUser(guildId, userId, points) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users || !guild.users[userId]) {
+                return { success: false, error: 'User not found in guild' };
+            }
+
+            const result = await collection.updateOne(
+                { guildId: guildId },
+                { $inc: { [`users.${userId}.attendance`]: points } }
+            );
+
+            if (result.modifiedCount === 0) {
+                return { success: false, error: 'Failed to update attendance' };
+            }
+
+            // Get the new total
+            const newTotal = await this.getUserAttendance(guildId, userId);
+            
+            console.log(`✅ Added ${points} attendance point${points > 1 ? 's' : ''} to user ${userId} in guild ${guildId}`);
+            return { success: true, newTotal: newTotal };
+        } catch (error) {
+            console.error('❌ Failed to add attendance to user:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async removeAttendanceFromUser(guildId, userId, points) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users || !guild.users[userId]) {
+                return { success: false, error: 'User not found in guild' };
+            }
+
+            const result = await collection.updateOne(
+                { guildId: guildId },
+                { $inc: { [`users.${userId}.attendance`]: -points } }
+            );
+
+            if (result.modifiedCount === 0) {
+                return { success: false, error: 'Failed to update attendance' };
+            }
+
+            // Get the new total
+            const newTotal = await this.getUserAttendance(guildId, userId);
+            
+            console.log(`✅ Removed ${points} attendance point${points > 1 ? 's' : ''} from user ${userId} in guild ${guildId}`);
+            return { success: true, newTotal: newTotal };
+        } catch (error) {
+            console.error('❌ Failed to remove attendance from user:', error);
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 module.exports = DatabaseManager;
