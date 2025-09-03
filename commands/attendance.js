@@ -20,10 +20,7 @@ module.exports = {
                     option.setName('user')
                         .setDescription('User to check attendance for (leave empty for your own)')
                         .setRequired(false)))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('leaderboard')
-                .setDescription('Show attendance leaderboard for all users')),
+
 
     async execute(interaction, db) {
         try {
@@ -50,9 +47,6 @@ module.exports = {
                     break;
                 case 'check':
                     await this.handleCheckAttendance(interaction, db);
-                    break;
-                case 'leaderboard':
-                    await this.handleAttendanceLeaderboard(interaction, db);
                     break;
                 default:
                     if (!interaction.replied && !interaction.deferred) {
@@ -305,51 +299,7 @@ module.exports = {
         await interaction.reply({ embeds: [embed] });
     },
 
-    async handleAttendanceLeaderboard(interaction, db) {
-        // Get all user attendance data
-        const attendanceData = await db.getAllUserAttendance(interaction.guildId);
 
-        if (attendanceData.length === 0) {
-            const embed = new EmbedBuilder()
-                .setColor('#FFAA00')
-                .setTitle('📊 Attendance Leaderboard')
-                .setDescription('No attendance data found. Use `/attendance add` to start tracking attendance.')
-                .setFooter({ text: 'Phoenix Assistance Bot' })
-                .setTimestamp();
-            
-            return interaction.reply({ embeds: [embed] });
-        }
-
-        // Create leaderboard embed
-        const embed = new EmbedBuilder()
-            .setColor('#0099FF')
-            .setTitle('📊 Attendance Leaderboard')
-            .setDescription('Top attendance performers in the guild')
-            .setFooter({ text: 'Phoenix Assistance Bot • Attendance tracking' })
-            .setTimestamp();
-
-        // Add top 10 users to the leaderboard
-        const topUsers = attendanceData.slice(0, 10);
-        const leaderboardText = topUsers.map((user, index) => {
-            const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-            return `${medal} **${user.inGameName}** - ${user.attendance} points`;
-        }).join('\n');
-
-        embed.addFields(
-            { name: '🏆 Top Performers', value: leaderboardText || 'No data available', inline: false }
-        );
-
-        // Add summary statistics
-        const totalUsers = attendanceData.length;
-        const totalAttendance = attendanceData.reduce((sum, user) => sum + user.attendance, 0);
-        const averageAttendance = totalUsers > 0 ? (totalAttendance / totalUsers).toFixed(1) : 0;
-
-        embed.addFields(
-            { name: '📈 Statistics', value: `Total Users: ${totalUsers}\nTotal Points: ${totalAttendance}\nAverage: ${averageAttendance}`, inline: true }
-        );
-
-        await interaction.reply({ embeds: [embed] });
-    },
 
     async handleButtonInteraction(interaction, db) {
         try {

@@ -488,6 +488,16 @@ client.handleButtonInteraction = async (interaction) => {
         } else {
             console.error('Attendance command or handleButtonInteraction method not found');
         }
+    } else if (customId.startsWith('leaderboard_') || customId === 'first' || customId === 'prev' || customId === 'next' || customId === 'last') {
+        console.log('Leaderboard button detected, routing to leaderboard command');
+        
+        // This is a leaderboard button
+        const leaderboardCommand = client.commands.get('leaderboard');
+        if (leaderboardCommand && leaderboardCommand.handleButtonInteraction) {
+            await leaderboardCommand.handleButtonInteraction(interaction, client.dbManager);
+        } else {
+            console.error('Leaderboard command or handleButtonInteraction method not found');
+        }
     }
 };
 
