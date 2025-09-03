@@ -7,7 +7,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('add')
-                .setDescription('Add 1 attendance point to all registered users'))
+                .setDescription('Add 1 attendance point to all users in voice channel'))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('wipe')
@@ -19,7 +19,20 @@ module.exports = {
                 .addUserOption(option =>
                     option.setName('user')
                         .setDescription('User to check attendance for (leave empty for your own)')
-                        .setRequired(false))),
+                        .setRequired(false)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('set')
+                .setDescription('Set attendance points for a specific user')
+                .addUserOption(option =>
+                    option.setName('user')
+                        .setDescription('User to set attendance for')
+                        .setRequired(true))
+                .addIntegerOption(option =>
+                    option.setName('points')
+                        .setDescription('Number of attendance points to set')
+                        .setRequired(true)
+                        .setMinValue(0))),
 
     async execute(interaction, db) {
         try {
@@ -46,6 +59,9 @@ module.exports = {
                     break;
                 case 'check':
                     await this.handleCheckAttendance(interaction, db);
+                    break;
+                case 'set':
+                    await this.handleSetAttendance(interaction, db);
                     break;
                 default:
                     if (!interaction.replied && !interaction.deferred) {
@@ -296,6 +312,102 @@ module.exports = {
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed] });
+    },
+
+    async handleSetAttendance(interaction, db) {
+        // Check if user has permission
+        const member = interaction.member;
+        let hasPermission = false;
+        
+        // Check if user is admin
+        if (member.permissions.has('Administrator')) {
+            hasPermission = true;
+            console.log(`User ${interaction.user.id} has Administrator permission`);
+        } else {
+            // Check if user has attendance permission directly
+            try {
+                const userHasPermission = await db.hasPermission(interaction.guildId, member.id, 'attendance');
+                if (userHasPermission) {
+                    hasPermission = true;
+                    console.log(`User ${interaction.user.id} has direct attendance permission`);
+                }
+            } catch (error) {
+                console.error('Error checking user permission:', error);
+            }
+            
+            // Check if any of user's roles have attendance permission
+            if (!hasPermission) {
+                for (const role of member.roles.cache.values()) {
+                    try {
+                        const roleHasPermission = await db.hasPermission(interaction.guildId, role.id, 'attendance');
+                        if (roleHasPermission) {
+                            hasPermission = true;
+                            console.log(`User ${interaction.user.id} has attendance permission through role: ${role.name}`);
+                            break;
+                        }
+                    } catch (error) {
+                        console.error(`Error checking role ${role.id} permission:`, error);
+                    }
+                }
+            }
+        }
+
+        if (!hasPermission) {
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Permission Denied')
+                .setDescription('You do not have permission to set attendance points.\n\n**Required:** Administrator role or attendance permission')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        const targetUser = interaction.options.getUser('user');
+        const attendancePoints = interaction.options.getInteger('points');
+
+        // Check if target user is registered
+        const userRegistration = await db.getUserRegistration(interaction.guildId, targetUser.id);
+        if (!userRegistration) {
+            const embed = new EmbedBuilder()
+                .setColor('#FFAA00')
+                .setTitle('⚠️ User Not Registered')
+                .setDescription(`${targetUser.toString()} is not registered with the guild.\n\nThey must register first using \`/register\` before you can set their attendance points.`)
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Set the user's attendance points
+        const result = await db.setUserAttendance(interaction.guildId, targetUser.id, attendancePoints);
+
+        if (result.success) {
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle('✅ Attendance Points Set Successfully!')
+                .setDescription(`Set attendance points for ${targetUser.toString()}`)
+                .addFields(
+                    { name: '👤 User', value: targetUser.toString(), inline: true },
+                    { name: '🎮 In-Game Name', value: userRegistration.inGameName, inline: true },
+                    { name: '📊 New Attendance Points', value: result.attendancePoints.toString(), inline: true },
+                    { name: '👨‍💼 Set By', value: interaction.user.toString(), inline: true },
+                    { name: '📅 Date', value: new Date().toLocaleDateString(), inline: true }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot • Attendance management' })
+                .setTimestamp();
+            
+            await interaction.reply({ embeds: [embed] });
+        } else {
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Failed to Set Attendance Points')
+                .setDescription(result.error || 'Failed to set attendance points. Please try again.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
     },
 
     async handleButtonInteraction(interaction, db) {

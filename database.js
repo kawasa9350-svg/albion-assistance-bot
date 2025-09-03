@@ -1008,6 +1008,33 @@ class DatabaseManager {
             return [];
         }
     }
+
+    async setUserAttendance(guildId, userId, attendancePoints) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users || !guild.users[userId]) {
+                return { success: false, error: 'User not found' };
+            }
+
+            // Validate attendance points (must be non-negative integer)
+            if (attendancePoints < 0 || !Number.isInteger(attendancePoints)) {
+                return { success: false, error: 'Attendance points must be a non-negative integer' };
+            }
+
+            await collection.updateOne(
+                { guildId: guildId },
+                { $set: { [`users.${userId}.attendance`]: attendancePoints } }
+            );
+            
+            console.log(`✅ Set attendance for user ${userId} in guild ${guildId}: ${attendancePoints} points`);
+            return { success: true, attendancePoints: attendancePoints };
+        } catch (error) {
+            console.error('❌ Failed to set user attendance:', error);
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 module.exports = DatabaseManager;
