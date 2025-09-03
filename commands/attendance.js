@@ -128,19 +128,55 @@ module.exports = {
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
 
-        // Add attendance to all users
-        const result = await db.addAttendanceToAllUsers(interaction.guildId);
+        // Check if the user is in a voice channel
+        if (!member.voice.channel) {
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Not in Voice Channel')
+                .setDescription('You must be in a voice channel to add attendance points.\n\nOnly users in the same voice channel as you will receive attendance points.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Get all users in the same voice channel
+        const voiceChannel = member.voice.channel;
+        const voiceChannelMembers = voiceChannel.members.filter(member => !member.user.bot);
+        const userIds = voiceChannelMembers.map(member => member.id);
+
+        if (userIds.length === 0) {
+            const embed = new EmbedBuilder()
+                .setColor('#FFAA00')
+                .setTitle('⚠️ No Users in Voice Channel')
+                .setDescription('There are no users in your voice channel to give attendance points to.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Add attendance to users in voice channel
+        const result = await db.addAttendanceToUsers(interaction.guildId, userIds);
 
         if (result.success) {
+            // Get user names for display
+            const userNames = result.userIds.map(userId => {
+                const member = voiceChannelMembers.get(userId);
+                return member ? member.displayName : `User ${userId}`;
+            });
+
             const embed = new EmbedBuilder()
                 .setColor('#00FF00')
                 .setTitle('✅ Attendance Added Successfully!')
-                .setDescription(`Added 1 attendance point to **${result.userCount}** registered users.`)
+                .setDescription(`Added 1 attendance point to **${result.userCount}** registered users in voice channel.`)
                 .addFields(
                     { name: '📊 Users Affected', value: result.userCount.toString(), inline: true },
-                    { name: '📅 Date', value: new Date().toLocaleDateString(), inline: true }
+                    { name: '🎤 Voice Channel', value: voiceChannel.name, inline: true },
+                    { name: '📅 Date', value: new Date().toLocaleDateString(), inline: true },
+                    { name: '👥 Users', value: userNames.join(', '), inline: false }
                 )
-                .setFooter({ text: 'Phoenix Assistance Bot • Attendance tracking' })
+                .setFooter({ text: 'Phoenix Assistance Bot • Voice channel attendance tracking' })
                 .setTimestamp();
             
             await interaction.reply({ embeds: [embed] });

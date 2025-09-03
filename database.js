@@ -907,6 +907,40 @@ class DatabaseManager {
         }
     }
 
+    async addAttendanceToUsers(guildId, userIds) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users) {
+                console.log('No users found in guild for attendance tracking');
+                return { success: false, error: 'No users found' };
+            }
+
+            // Filter to only include registered users
+            const registeredUserIds = userIds.filter(userId => guild.users[userId]);
+            
+            if (registeredUserIds.length === 0) {
+                return { success: false, error: 'No registered users found in voice channel' };
+            }
+
+            const updatePromises = registeredUserIds.map(userId => 
+                collection.updateOne(
+                    { guildId: guildId },
+                    { $inc: { [`users.${userId}.attendance`]: 1 } }
+                )
+            );
+
+            await Promise.all(updatePromises);
+            
+            console.log(`✅ Added attendance point to ${registeredUserIds.length} users in voice channel for guild ${guildId}`);
+            return { success: true, userCount: registeredUserIds.length, userIds: registeredUserIds };
+        } catch (error) {
+            console.error('❌ Failed to add attendance to users:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
     async wipeAllAttendance(guildId) {
         try {
             const collection = await this.getGuildCollection(guildId);

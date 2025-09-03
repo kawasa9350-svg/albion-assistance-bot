@@ -19,7 +19,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('lock')
-                .setDescription('Toggle build details visibility for a comp')),
+                .setDescription('DO NOT USE THIS COMMAND, IT IS FOR INTERNAL USE ONLY')),
 
     async execute(interaction, db) {
         try {

@@ -98,7 +98,15 @@ module.exports = {
                         });
                     }
 
-                    await interaction.reply({ embeds: [embed], ephemeral: false });
+                    try {
+                        await interaction.reply({ embeds: [embed], ephemeral: false });
+                    } catch (error) {
+                        if (error.code === 10062 || error.code === 40060) {
+                            console.log('Interaction already handled or timed out');
+                        } else {
+                            console.error('Error replying to interaction:', error);
+                        }
+                    }
                     return;
                 } else {
                     const embed = new EmbedBuilder()
@@ -108,7 +116,15 @@ module.exports = {
                         .setFooter({ text: 'Phoenix Assistance Bot' })
                         .setTimestamp();
                     
-                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                    try {
+                        await interaction.reply({ embeds: [embed], ephemeral: true });
+                    } catch (error) {
+                        if (error.code === 10062 || error.code === 40060) {
+                            console.log('Interaction already handled or timed out');
+                        } else {
+                            console.error('Error replying to interaction:', error);
+                        }
+                    }
                     return;
                 }
             }
@@ -181,7 +197,15 @@ module.exports = {
                     });
                 }
 
-                await interaction.reply({ embeds: [embed], ephemeral: false });
+                try {
+                    await interaction.reply({ embeds: [embed], ephemeral: false });
+                } catch (error) {
+                    if (error.code === 10062 || error.code === 40060) {
+                        console.log('Interaction already handled or timed out');
+                    } else {
+                        console.error('Error replying to interaction:', error);
+                    }
+                }
             } else {
                 const embed = new EmbedBuilder()
                     .setColor('#FF0000')
@@ -190,7 +214,15 @@ module.exports = {
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
                 
-                await interaction.reply({ embeds: [embed], ephemeral: true });
+                try {
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                } catch (error) {
+                    if (error.code === 10062 || error.code === 40060) {
+                        console.log('Interaction already handled or timed out');
+                    } else {
+                        console.error('Error replying to interaction:', error);
+                    }
+                }
             }
         } catch (error) {
             console.error('Error in register command:', error);
@@ -201,7 +233,15 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
             
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            try {
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+            } catch (replyError) {
+                if (replyError.code === 10062 || replyError.code === 40060) {
+                    console.log('Interaction already handled or timed out');
+                } else {
+                    console.error('Error replying to interaction:', replyError);
+                }
+            }
         }
     },
 };
