@@ -1035,6 +1035,77 @@ class DatabaseManager {
             return { success: false, error: error.message };
         }
     }
+
+    async removeUserAttendance(guildId, userId, pointsToRemove) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users || !guild.users[userId]) {
+                return { success: false, error: 'User not found' };
+            }
+
+            // Validate points to remove (must be positive integer)
+            if (pointsToRemove <= 0 || !Number.isInteger(pointsToRemove)) {
+                return { success: false, error: 'Points to remove must be a positive integer' };
+            }
+
+            const currentAttendance = guild.users[userId].attendance || 0;
+            const newAttendance = Math.max(0, currentAttendance - pointsToRemove);
+            const actualPointsRemoved = currentAttendance - newAttendance;
+
+            await collection.updateOne(
+                { guildId: guildId },
+                { $set: { [`users.${userId}.attendance`]: newAttendance } }
+            );
+            
+            console.log(`✅ Removed ${actualPointsRemoved} attendance points from user ${userId} in guild ${guildId} (${currentAttendance} -> ${newAttendance})`);
+            return { 
+                success: true, 
+                pointsRemoved: actualPointsRemoved,
+                previousAttendance: currentAttendance,
+                newAttendance: newAttendance
+            };
+        } catch (error) {
+            console.error('❌ Failed to remove user attendance:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async addUserAttendance(guildId, userId, pointsToAdd) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users || !guild.users[userId]) {
+                return { success: false, error: 'User not found' };
+            }
+
+            // Validate points to add (must be positive integer)
+            if (pointsToAdd <= 0 || !Number.isInteger(pointsToAdd)) {
+                return { success: false, error: 'Points to add must be a positive integer' };
+            }
+
+            const currentAttendance = guild.users[userId].attendance || 0;
+            const newAttendance = currentAttendance + pointsToAdd;
+
+            await collection.updateOne(
+                { guildId: guildId },
+                { $set: { [`users.${userId}.attendance`]: newAttendance } }
+            );
+            
+            console.log(`✅ Added ${pointsToAdd} attendance points to user ${userId} in guild ${guildId} (${currentAttendance} -> ${newAttendance})`);
+            return { 
+                success: true, 
+                pointsAdded: pointsToAdd,
+                previousAttendance: currentAttendance,
+                newAttendance: newAttendance
+            };
+        } catch (error) {
+            console.error('❌ Failed to add user attendance:', error);
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 module.exports = DatabaseManager;
