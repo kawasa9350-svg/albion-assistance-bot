@@ -24,7 +24,8 @@ module.exports = {
                     { name: 'lootsplit-history', value: 'lootsplit-history' },
                     { name: 'paycheck', value: 'paycheck' },
                     { name: 'pay', value: 'pay' },
-                    { name: 'balance', value: 'balance' }
+                    { name: 'balance', value: 'balance' },
+                    { name: 'attendance', value: 'attendance' }
                 ))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
