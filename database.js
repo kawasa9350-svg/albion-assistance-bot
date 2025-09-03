@@ -115,6 +115,7 @@ class DatabaseManager {
                         [`users.${userId}`]: {
                             inGameName: inGameName,
                             balance: 0,
+                            attendance: 0,
                             registeredAt: new Date()
                         }
                     }
@@ -874,6 +875,107 @@ class DatabaseManager {
         } catch (error) {
             console.error('❌ Failed to check guild registration:', error);
             return false;
+        }
+    }
+
+    // Attendance tracking methods
+    async addAttendanceToAllUsers(guildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users) {
+                console.log('No users found in guild for attendance tracking');
+                return { success: false, error: 'No users found' };
+            }
+
+            const userIds = Object.keys(guild.users);
+            const updatePromises = userIds.map(userId => 
+                collection.updateOne(
+                    { guildId: guildId },
+                    { $inc: { [`users.${userId}.attendance`]: 1 } }
+                )
+            );
+
+            await Promise.all(updatePromises);
+            
+            console.log(`✅ Added attendance point to ${userIds.length} users in guild ${guildId}`);
+            return { success: true, userCount: userIds.length };
+        } catch (error) {
+            console.error('❌ Failed to add attendance to all users:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async wipeAllAttendance(guildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users) {
+                console.log('No users found in guild for attendance wipe');
+                return { success: false, error: 'No users found' };
+            }
+
+            const userIds = Object.keys(guild.users);
+            const updatePromises = userIds.map(userId => 
+                collection.updateOne(
+                    { guildId: guildId },
+                    { $set: { [`users.${userId}.attendance`]: 0 } }
+                )
+            );
+
+            await Promise.all(updatePromises);
+            
+            console.log(`✅ Wiped attendance for ${userIds.length} users in guild ${guildId}`);
+            return { success: true, userCount: userIds.length };
+        } catch (error) {
+            console.error('❌ Failed to wipe attendance:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getUserAttendance(guildId, userId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users || !guild.users[userId]) {
+                return 0;
+            }
+            
+            return guild.users[userId].attendance || 0;
+        } catch (error) {
+            console.error('❌ Failed to get user attendance:', error);
+            return 0;
+        }
+    }
+
+    async getAllUserAttendance(guildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.users) {
+                return [];
+            }
+            
+            const attendanceData = [];
+            for (const [userId, userData] of Object.entries(guild.users)) {
+                attendanceData.push({
+                    userId: userId,
+                    inGameName: userData.inGameName,
+                    attendance: userData.attendance || 0
+                });
+            }
+            
+            // Sort by attendance (highest first)
+            attendanceData.sort((a, b) => b.attendance - a.attendance);
+            
+            return attendanceData;
+        } catch (error) {
+            console.error('❌ Failed to get all user attendance:', error);
+            return [];
         }
     }
 }

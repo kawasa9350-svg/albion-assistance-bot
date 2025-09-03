@@ -478,6 +478,16 @@ client.handleButtonInteraction = async (interaction) => {
         } else {
             console.error('Signup command or handleBuildSignup method not found');
         }
+    } else if (customId.startsWith('confirm_wipe_attendance') || customId.startsWith('cancel_wipe_attendance')) {
+        console.log('Attendance button detected, routing to attendance command');
+        
+        // This is an attendance button
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && attendanceCommand.handleButtonInteraction) {
+            await attendanceCommand.handleButtonInteraction(interaction, attendanceCommand.dbManager);
+        } else {
+            console.error('Attendance command or handleButtonInteraction method not found');
+        }
     }
 };
 
