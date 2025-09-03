@@ -3,7 +3,11 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('attendance')
-        .setDescription('Add 1 attendance point to all users in voice channel')
+        .setDescription('Manage attendance tracking for content')
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('take')
+                .setDescription('Add 1 attendance point to all users in voice channel'))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('wipe')
@@ -57,30 +61,28 @@ module.exports = {
                 return interaction.reply({ embeds: [embed], ephemeral: true });
             }
 
-            const subcommand = interaction.options.getSubcommand(false);
+            const subcommand = interaction.options.getSubcommand();
 
-            if (!subcommand) {
-                // No subcommand provided - handle voice channel attendance
-                await this.handleVoiceChannelAttendance(interaction, db);
-            } else {
-                switch (subcommand) {
-                    case 'wipe':
-                        await this.handleWipeAttendance(interaction, db);
-                        break;
-                    case 'check':
-                        await this.handleCheckAttendance(interaction, db);
-                        break;
-                    case 'add':
-                        await this.handleAddUserAttendance(interaction, db);
-                        break;
-                    case 'remove':
-                        await this.handleRemoveAttendance(interaction, db);
-                        break;
-                    default:
-                        if (!interaction.replied && !interaction.deferred) {
-                            await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
-                        }
-                }
+            switch (subcommand) {
+                case 'take':
+                    await this.handleVoiceChannelAttendance(interaction, db);
+                    break;
+                case 'wipe':
+                    await this.handleWipeAttendance(interaction, db);
+                    break;
+                case 'check':
+                    await this.handleCheckAttendance(interaction, db);
+                    break;
+                case 'add':
+                    await this.handleAddUserAttendance(interaction, db);
+                    break;
+                case 'remove':
+                    await this.handleRemoveAttendance(interaction, db);
+                    break;
+                default:
+                    if (!interaction.replied && !interaction.deferred) {
+                        await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
+                    }
             }
         } catch (error) {
             console.error('Error in attendance command:', error);
