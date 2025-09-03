@@ -23,14 +23,22 @@ module.exports = {
             await this.showLeaderboard(interaction, db, 'balance');
         } catch (error) {
             console.error('Error in leaderboard command:', error);
-            const embed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('❌ Error')
-                .setDescription('An error occurred while fetching the leaderboard.')
-                .setFooter({ text: 'Phoenix Assistance Bot' })
-                .setTimestamp();
             
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            // Only try to reply if we haven't already replied and the interaction is still valid
+            if (!interaction.replied && !interaction.deferred) {
+                try {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setTitle('❌ Error')
+                        .setDescription('An error occurred while fetching the leaderboard.')
+                        .setFooter({ text: 'Phoenix Assistance Bot' })
+                        .setTimestamp();
+                    
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                } catch (replyError) {
+                    console.error('Error sending error message:', replyError);
+                }
+            }
         }
     },
 
@@ -185,70 +193,81 @@ module.exports = {
             const collector = response.createMessageComponentCollector({ time: 300000 }); // 5 minutes
 
             collector.on('collect', async (i) => {
-                if (i.user.id !== interaction.user.id) {
-                    await i.reply({ content: '❌ This leaderboard is not yours to control!', ephemeral: true });
-                    return;
-                }
+                try {
+                    if (i.user.id !== interaction.user.id) {
+                        await i.reply({ content: '❌ This leaderboard is not yours to control!', ephemeral: true });
+                        return;
+                    }
 
-                let shouldUpdate = false;
+                    let shouldUpdate = false;
 
-                // Handle type switching
-                if (i.customId === 'leaderboard_balance' && type !== 'balance') {
-                    type = 'balance';
-                    currentPage = 0;
-                    shouldUpdate = true;
-                } else if (i.customId === 'leaderboard_attendance' && type !== 'attendance') {
-                    type = 'attendance';
-                    currentPage = 0;
-                    shouldUpdate = true;
-                }
-                // Handle pagination
-                else if (i.customId === 'first') {
-                    currentPage = 0;
-                    shouldUpdate = true;
-                } else if (i.customId === 'prev') {
-                    currentPage = Math.max(0, currentPage - 1);
-                    shouldUpdate = true;
-                } else if (i.customId === 'next') {
-                    currentPage = Math.min(totalPages - 1, currentPage + 1);
-                    shouldUpdate = true;
-                } else if (i.customId === 'last') {
-                    currentPage = totalPages - 1;
-                    shouldUpdate = true;
-                }
-
-                if (shouldUpdate) {
-                    // Re-fetch data if type changed
-                    if (i.customId === 'leaderboard_balance' || i.customId === 'leaderboard_attendance') {
-                        // Re-fetch data for the new type
-                        let newData;
-                        if (type === 'balance') {
-                            newData = await db.getAllUserBalances(interaction.guildId);
-                        } else {
-                            newData = await db.getAllUserAttendance(interaction.guildId);
-                        }
-                        
-                        // Update the data and reset pagination
-                        data = newData;
+                    // Handle type switching
+                    if (i.customId === 'leaderboard_balance' && type !== 'balance') {
+                        type = 'balance';
                         currentPage = 0;
-                        
-                        // Sort users (highest first)
-                        const sortedUsers = data.sort((a, b) => {
-                            const aValue = type === 'balance' ? a.balance : a.attendance;
-                            const bValue = type === 'balance' ? b.balance : b.attendance;
-                            return bValue - aValue;
-                        });
-                        
-                        // Calculate total
-                        const total = sortedUsers.reduce((sum, user) => {
-                            const value = type === 'balance' ? user.balance : user.attendance;
-                            return sum + value;
-                        }, 0);
-                        
-                        // Update pagination settings
-                        const totalPages = Math.ceil(sortedUsers.length / usersPerPage);
-                        
-                        // Create new embed and rows
+                        shouldUpdate = true;
+                    } else if (i.customId === 'leaderboard_attendance' && type !== 'attendance') {
+                        type = 'attendance';
+                        currentPage = 0;
+                        shouldUpdate = true;
+                    }
+                    // Handle pagination
+                    else if (i.customId === 'first') {
+                        currentPage = 0;
+                        shouldUpdate = true;
+                    } else if (i.customId === 'prev') {
+                        currentPage = Math.max(0, currentPage - 1);
+                        shouldUpdate = true;
+                    } else if (i.customId === 'next') {
+                        currentPage = Math.min(totalPages - 1, currentPage + 1);
+                        shouldUpdate = true;
+                    } else if (i.customId === 'last') {
+                        currentPage = totalPages - 1;
+                        shouldUpdate = true;
+                    }
+
+                    if (shouldUpdate) {
+                        // Re-fetch data if type changed
+                        if (i.customId === 'leaderboard_balance' || i.customId === 'leaderboard_attendance') {
+                            // Re-fetch data for the new type
+                            let newData;
+                            if (type === 'balance') {
+                                newData = await db.getAllUserBalances(interaction.guildId);
+                            } else {
+                                newData = await db.getAllUserAttendance(interaction.guildId);
+                            }
+                            
+                            // Update the data and reset pagination
+                            data = newData;
+                            currentPage = 0;
+                            
+                            // Sort users (highest first)
+                            const sortedUsers = data.sort((a, b) => {
+                                const aValue = type === 'balance' ? a.balance : a.attendance;
+                                const bValue = type === 'balance' ? b.balance : b.attendance;
+                                return bValue - aValue;
+                            });
+                            
+                            // Calculate total
+                            const total = sortedUsers.reduce((sum, user) => {
+                                const value = type === 'balance' ? user.balance : user.attendance;
+                                return sum + value;
+                            }, 0);
+                            
+                            // Update pagination settings
+                            const totalPages = Math.ceil(sortedUsers.length / usersPerPage);
+                            
+                            // Create new embed and rows
+                            const updatedEmbed = createLeaderboardEmbed(currentPage);
+                            const updatedRows = createNavigationRows();
+
+                            await i.update({
+                                embeds: [updatedEmbed],
+                                components: updatedRows
+                            });
+                            return;
+                        }
+
                         const updatedEmbed = createLeaderboardEmbed(currentPage);
                         const updatedRows = createNavigationRows();
 
@@ -256,16 +275,16 @@ module.exports = {
                             embeds: [updatedEmbed],
                             components: updatedRows
                         });
-                        return;
                     }
-
-                    const updatedEmbed = createLeaderboardEmbed(currentPage);
-                    const updatedRows = createNavigationRows();
-
-                    await i.update({
-                        embeds: [updatedEmbed],
-                        components: updatedRows
-                    });
+                } catch (error) {
+                    console.error('Error in leaderboard collector:', error);
+                    try {
+                        if (!i.replied && !i.deferred) {
+                            await i.reply({ content: '❌ An error occurred while processing your interaction.', ephemeral: true });
+                        }
+                    } catch (replyError) {
+                        console.error('Error sending collector error message:', replyError);
+                    }
                 }
             });
 
@@ -320,21 +339,21 @@ module.exports = {
             });
         } catch (error) {
             console.error('Error in showLeaderboard:', error);
-            const embed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('❌ Error')
-                .setDescription('An error occurred while fetching the leaderboard.')
-                .setFooter({ text: 'Phoenix Assistance Bot' })
-                .setTimestamp();
             
-            try {
-                if (!interaction.replied && !interaction.deferred) {
+            // Only try to reply if we haven't already replied and the interaction is still valid
+            if (!interaction.replied && !interaction.deferred) {
+                try {
+                    const embed = new EmbedBuilder()
+                        .setColor('#FF0000')
+                        .setTitle('❌ Error')
+                        .setDescription('An error occurred while fetching the leaderboard.')
+                        .setFooter({ text: 'Phoenix Assistance Bot' })
+                        .setTimestamp();
+                    
                     await interaction.reply({ embeds: [embed], ephemeral: true });
-                } else {
-                    await interaction.followUp({ embeds: [embed], ephemeral: true });
+                } catch (replyError) {
+                    console.error('Error sending error message:', replyError);
                 }
-            } catch (replyError) {
-                console.error('Error sending error message:', replyError);
             }
         }
     },
