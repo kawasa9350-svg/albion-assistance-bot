@@ -72,21 +72,21 @@ module.exports = {
             }
 
             // Sort users (highest first)
-            const sortedUsers = data.sort((a, b) => {
+            let sortedUsers = data.sort((a, b) => {
                 const aValue = type === 'balance' ? a.balance : a.attendance;
                 const bValue = type === 'balance' ? b.balance : b.attendance;
                 return bValue - aValue;
             });
             
             // Calculate total
-            const total = sortedUsers.reduce((sum, user) => {
+            let total = sortedUsers.reduce((sum, user) => {
                 const value = type === 'balance' ? user.balance : user.attendance;
                 return sum + value;
             }, 0);
             
             // Pagination settings
             const usersPerPage = 15;
-            const totalPages = Math.ceil(sortedUsers.length / usersPerPage);
+            let totalPages = Math.ceil(sortedUsers.length / usersPerPage);
             let currentPage = 0;
 
             // Function to create leaderboard embed
@@ -241,21 +241,21 @@ module.exports = {
                             data = newData;
                             currentPage = 0;
                             
-                            // Sort users (highest first)
-                            const sortedUsers = data.sort((a, b) => {
+                            // Sort users (highest first) - Update the existing sortedUsers variable
+                            sortedUsers = data.sort((a, b) => {
                                 const aValue = type === 'balance' ? a.balance : a.attendance;
                                 const bValue = type === 'balance' ? b.balance : b.attendance;
                                 return bValue - aValue;
                             });
                             
-                            // Calculate total
-                            const total = sortedUsers.reduce((sum, user) => {
+                            // Calculate total - Update the existing total variable
+                            total = sortedUsers.reduce((sum, user) => {
                                 const value = type === 'balance' ? user.balance : user.attendance;
                                 return sum + value;
                             }, 0);
                             
-                            // Update pagination settings
-                            const totalPages = Math.ceil(sortedUsers.length / usersPerPage);
+                            // Update pagination settings - Update the existing totalPages variable
+                            totalPages = Math.ceil(sortedUsers.length / usersPerPage);
                             
                             // Create new embed and rows
                             const updatedEmbed = createLeaderboardEmbed(currentPage);
