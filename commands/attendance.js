@@ -19,8 +19,7 @@ module.exports = {
                 .addUserOption(option =>
                     option.setName('user')
                         .setDescription('User to check attendance for (leave empty for your own)')
-                        .setRequired(false)))
-
+                        .setRequired(false))),
 
     async execute(interaction, db) {
         try {
