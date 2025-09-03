@@ -48,7 +48,7 @@ module.exports = {
             
             if (type === 'balance') {
                 data = await db.getAllUserBalances(interaction.guildId);
-                title = '💰 Guild Balance Leaderboard';
+                title = '💰 Guild Leaderboard';
                 description = 'Top earners in the guild';
                 totalField = 'Total Guild Owed';
                 emptyMessage = 'No users have balances yet. Users need to register and receive payments to appear on the leaderboard.';
