@@ -998,7 +998,6 @@ class DatabaseManager {
             for (const [userId, userData] of Object.entries(guild.users)) {
                 attendanceData.push({
                     userId: userId,
-                    inGameName: userData.inGameName,
                     attendance: userData.attendance || 0
                 });
             }
