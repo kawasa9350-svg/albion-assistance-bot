@@ -292,7 +292,7 @@ module.exports = {
                 .setColor('#FF6B6B')
                 .setTitle(`📝 Build Signup - ${totalSignups}/${totalBuilds}`)
                 .setDescription(`**${selectedCompName}** - Available Builds\n\n**Content Type:** ${signupData.contentType}`)
-                .setFooter({ text: 'Phoenix Assistance Bot • Click buttons below to sign up' })
+                .setFooter({ text: `Phoenix Assistance Bot • Click buttons below to sign up • Session: ${signupData.sessionId}` })
                 .setTimestamp();
 
             // Add build list with current signups
@@ -362,6 +362,19 @@ module.exports = {
     // Helper method to load composition signups from database
     async loadCompositionSignups(interaction, compName, db, sessionId) {
         try {
+            // Clear any existing signup data for this composition to prevent cross-session contamination
+            const keysToDelete = [];
+            for (const [key, value] of interaction.client.eventSignups.entries()) {
+                if (key.startsWith(`comp_${compName}_`)) {
+                    keysToDelete.push(key);
+                }
+            }
+            keysToDelete.forEach(key => interaction.client.eventSignups.delete(key));
+            
+            if (keysToDelete.length > 0) {
+                console.log(`Cleared ${keysToDelete.length} existing signup entries for composition: ${compName}`);
+            }
+
             // Load existing signups from database for this composition and session
             const existingSignups = await db.getCompositionSignups(interaction.guildId, compName, sessionId);
             existingSignups.forEach((signups, key) => {
@@ -587,7 +600,7 @@ module.exports = {
                 .setColor('#4CAF50')
                 .setTitle(`📝 Build Signup - ${totalSignups}/${totalBuilds}`)
                 .setDescription(`**${compName}** - Available Builds`)
-                .setFooter({ text: 'Phoenix Assistance Bot • Click buttons below to sign up' })
+                .setFooter({ text: `Phoenix Assistance Bot • Click buttons below to sign up • Session: ${sessionId}` })
                 .setTimestamp();
 
             // Add build list with current signups
@@ -624,6 +637,9 @@ module.exports = {
                 msg.embeds[0].title.startsWith('📝 Build Signup') &&
                 msg.embeds[0].description && 
                 msg.embeds[0].description.includes(compName) &&
+                msg.embeds[0].footer && 
+                msg.embeds[0].footer.text && 
+                msg.embeds[0].footer.text.includes(`Session: ${sessionId}`) &&
                 msg.author && 
                 msg.author.id === interaction.client.user.id
             );
@@ -641,7 +657,7 @@ module.exports = {
             } else {
                 console.log('Could not find public signup message to update');
                 console.log('Searched through', messages.size, 'messages');
-                console.log('Looking for message with compName:', compName);
+                console.log('Looking for message with compName:', compName, 'and sessionId:', sessionId);
             }
             
         } catch (error) {
