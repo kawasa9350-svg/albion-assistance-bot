@@ -282,6 +282,11 @@ module.exports = {
                         } else {
                             console.log(`Invalid build detail custom ID format: ${interaction.customId}`);
                         }
+                    } else if (interaction.customId.startsWith('comp_build_edit_')) {
+                        // Handle build edit button from comp list
+                        const buildName = interaction.customId.replace('comp_build_edit_', '');
+                        console.log(`Opening build edit for: ${buildName}`);
+                        await this.handleBuildEditFromComp(interaction, db, buildName);
                     } else {
                         console.log(`Unknown interaction: ${interaction.customId}`);
                     }
@@ -581,6 +586,43 @@ module.exports = {
             
             const build = exactMatch; // Use the exact match
             
+            // Check if user has build-edit permission
+            const member = interaction.member;
+            let hasBuildEditPermission = false;
+            
+            // Check if user is admin
+            if (member.permissions.has('Administrator')) {
+                hasBuildEditPermission = true;
+                console.log(`User ${interaction.user.id} has Administrator permission for build editing`);
+            } else {
+                // Check if user has build permission directly
+                try {
+                    const userHasPermission = await db.hasPermission(interaction.guildId, member.id, 'build');
+                    if (userHasPermission) {
+                        hasBuildEditPermission = true;
+                        console.log(`User ${interaction.user.id} has direct build permission for editing`);
+                    }
+                } catch (error) {
+                    console.error('Error checking user build permission:', error);
+                }
+                
+                // Check if any of user's roles have build permission
+                if (!hasBuildEditPermission) {
+                    for (const role of member.roles.cache.values()) {
+                        try {
+                            const roleHasPermission = await db.hasPermission(interaction.guildId, role.id, 'build');
+                            if (roleHasPermission) {
+                                hasBuildEditPermission = true;
+                                console.log(`User ${interaction.user.id} has build permission through role: ${role.name}`);
+                                break;
+                            }
+                        } catch (error) {
+                            console.error(`Error checking role ${role.id} build permission:`, error);
+                        }
+                    }
+                }
+            }
+            
             // Create detailed build view embed (same format as /build list)
             const detailedEmbed = new EmbedBuilder()
                 .setColor('#00FF00')
@@ -611,9 +653,29 @@ module.exports = {
                 detailedEmbed.addFields({ name: '👤 Created By', value: `<@${build.createdBy}>`, inline: true });
             }
             
+            // Create components array
+            const components = [];
+            
+            // Add edit button if user has build-edit permission
+            if (hasBuildEditPermission) {
+                const editButton = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`comp_build_edit_${buildName}`)
+                            .setLabel('🔧 Edit Build')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('🔧')
+                    );
+                components.push(editButton);
+            }
+            
             // Send the build details as an ephemeral message
-            await interaction.reply({ embeds: [detailedEmbed], ephemeral: true });
-            console.log(`Build details displayed for: ${buildName}`);
+            await interaction.reply({ 
+                embeds: [detailedEmbed], 
+                components: components,
+                ephemeral: true 
+            });
+            console.log(`Build details displayed for: ${buildName}${hasBuildEditPermission ? ' with edit button' : ''}`);
             
         } catch (error) {
             console.error('Error handling build detail:', error);
@@ -621,6 +683,100 @@ module.exports = {
                 .setColor('#FF0000')
                 .setTitle('❌ Error')
                 .setDescription('An error occurred while loading build details. Please try again.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+    },
+
+    async handleBuildEditFromComp(interaction, db, buildName) {
+        try {
+            // Get the specific build data
+            const builds = await db.getBuilds(interaction.guildId);
+            const build = builds.find(b => b.name === buildName);
+            
+            if (!build) {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Build Not Found')
+                    .setDescription('The selected build could not be found.')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+
+            // Store build data for editing (similar to build-edit.js)
+            if (!interaction.client.editBuildData) {
+                interaction.client.editBuildData = new Map();
+            }
+            interaction.client.editBuildData.set(interaction.user.id, { 
+                build, 
+                originalName: buildName,
+                fromComp: true // Flag to indicate this came from comp list
+            });
+
+            // Create edit options menu (same as build-edit.js)
+            const editOptions = [
+                { label: 'Build Name', value: 'edit_name', description: 'Change the build name' },
+                { label: 'Content Type', value: 'edit_content_type', description: 'Change the content type' },
+                { label: 'Weapon', value: 'edit_weapon', description: 'Change the weapon' },
+                { label: 'Offhand', value: 'edit_offhand', description: 'Change the offhand item' },
+                { label: 'Cape', value: 'edit_cape', description: 'Change the cape' },
+                { label: 'Head', value: 'edit_head', description: 'Change the head armor' },
+                { label: 'Chest', value: 'edit_chest', description: 'Change the chest armor' },
+                { label: 'Shoes', value: 'edit_shoes', description: 'Change the shoes' },
+                { label: 'Food', value: 'edit_food', description: 'Change the food consumable' },
+                { label: 'Potion', value: 'edit_potion', description: 'Change the potion consumable' },
+                { label: 'Description', value: 'edit_description', description: 'Change the description' },
+                { label: 'Cancel', value: 'edit_cancel', description: 'Cancel editing' }
+            ];
+
+            const editSelect = new StringSelectMenuBuilder()
+                .setCustomId('build_edit_field_select')
+                .setPlaceholder('Select what to edit')
+                .addOptions(editOptions.map(option => 
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel(option.label)
+                        .setDescription(option.description)
+                        .setValue(option.value)
+                ));
+
+            const row = new ActionRowBuilder().addComponents(editSelect);
+
+            const embed = new EmbedBuilder()
+                .setColor('#0099FF')
+                .setTitle(`🔧 Editing: ${build.name}`)
+                .setDescription('**Build editing from comp list**\n\nSelect what you would like to edit:')
+                .addFields(
+                    { name: 'Content Type', value: build.contentType || 'Not specified', inline: true },
+                    { name: 'Weapon', value: build.weapon || 'Not specified', inline: true },
+                    { name: 'Offhand', value: build.offhand || 'Not specified', inline: true },
+                    { name: 'Cape', value: build.cape || 'Not specified', inline: true },
+                    { name: 'Head', value: build.head || 'Not specified', inline: true },
+                    { name: 'Chest', value: build.chest || 'Not specified', inline: true },
+                    { name: 'Shoes', value: build.shoes || 'Not specified', inline: true },
+                    { name: 'Food', value: build.food || 'Not specified', inline: true },
+                    { name: 'Potion', value: build.potion || 'Not specified', inline: true },
+                    { name: 'Description', value: build.description || 'Not specified', inline: true }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot • Build editing from comp' })
+                .setTimestamp();
+
+            await interaction.reply({ 
+                embeds: [embed], 
+                components: [row], 
+                ephemeral: true 
+            });
+            console.log(`Build edit interface opened for: ${buildName} from comp list`);
+            
+        } catch (error) {
+            console.error('Error in handleBuildEditFromComp:', error);
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('An error occurred while opening the build editor.')
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
             
