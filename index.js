@@ -56,7 +56,7 @@ client.once(Events.ClientReady, async () => {
     }
     
     // Set bot status
-    client.user.setActivity('the server', { type: 'WATCHING' });
+    client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: 'WATCHING' });
     
     // Test event handler registration
     console.log('🔧 Testing event handler registration...');
