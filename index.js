@@ -56,7 +56,7 @@ client.once(Events.ClientReady, async () => {
     }
     
     // Set bot status
-    client.user.setActivity('Albion Online', { type: 'PLAYING' });
+    client.user.setActivity('the server', { type: 'WATCHING' });
     
     // Test event handler registration
     console.log('🔧 Testing event handler registration...');
