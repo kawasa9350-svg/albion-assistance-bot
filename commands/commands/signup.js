@@ -292,7 +292,7 @@ module.exports = {
                 .setColor('#FF6B6B')
                 .setTitle(`📝 Build Signup - ${totalSignups}/${totalBuilds}`)
                 .setDescription(`**${selectedCompName}** - Available Builds\n\n**Content Type:** ${signupData.contentType}`)
-                .setFooter({ text: `Phoenix Assistance Bot • Click buttons below to sign up • Session: ${signupData.sessionId}` })
+                .setFooter({ text: 'Phoenix Assistance Bot • Click buttons below to sign up' })
                 .setTimestamp();
 
             // Add build list with current signups
@@ -587,7 +587,7 @@ module.exports = {
                 .setColor('#4CAF50')
                 .setTitle(`📝 Build Signup - ${totalSignups}/${totalBuilds}`)
                 .setDescription(`**${compName}** - Available Builds`)
-                .setFooter({ text: `Phoenix Assistance Bot • Click buttons below to sign up • Session: ${sessionId}` })
+                .setFooter({ text: 'Phoenix Assistance Bot • Click buttons below to sign up' })
                 .setTimestamp();
 
             // Add build list with current signups
@@ -624,9 +624,6 @@ module.exports = {
                 msg.embeds[0].title.startsWith('📝 Build Signup') &&
                 msg.embeds[0].description && 
                 msg.embeds[0].description.includes(compName) &&
-                msg.embeds[0].footer && 
-                msg.embeds[0].footer.text && 
-                msg.embeds[0].footer.text.includes(`Session: ${sessionId}`) &&
                 msg.author && 
                 msg.author.id === interaction.client.user.id
             );
@@ -644,7 +641,7 @@ module.exports = {
             } else {
                 console.log('Could not find public signup message to update');
                 console.log('Searched through', messages.size, 'messages');
-                console.log('Looking for message with compName:', compName, 'and sessionId:', sessionId);
+                console.log('Looking for message with compName:', compName);
             }
             
         } catch (error) {

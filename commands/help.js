@@ -104,7 +104,7 @@ module.exports = {
                                     { name: '5. /build list [content_type] [name]', value: 'List all builds with optional filtering', inline: false },
                                     { name: '6. /comp list', value: 'List all available comps', inline: false },
                                     { name: '7. /event list', value: 'List all available events', inline: false },
-                                    { name: '8. /signup', value: 'Create a signup for an event', inline: false }
+                                    { name: '8. /signup', value: 'Create a signup for an event', inline: false },
                                 );
                             break;
                     }
