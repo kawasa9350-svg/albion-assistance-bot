@@ -592,6 +592,18 @@ module.exports = {
             
             // Update the event data - convert 'none' to empty string for storage
             eventData.compName = selectedCompName === 'none' ? '' : selectedCompName;
+            
+            // Auto-set content type based on the selected comp
+            if (selectedCompName !== 'none' && selectedCompName !== '') {
+                // Get the comp details to extract its content type
+                const allComps = await db.getComps(interaction.guildId, 'all');
+                const selectedComp = allComps.find(comp => comp.name === selectedCompName);
+                if (selectedComp && selectedComp.contentType) {
+                    eventData.contentType = selectedComp.contentType;
+                    console.log(`Auto-set content type to: ${selectedComp.contentType} based on comp: ${selectedCompName}`);
+                }
+            }
+            
             interaction.client.eventData.set(userId, eventData);
 
             // Show final step
