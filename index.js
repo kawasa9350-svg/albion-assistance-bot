@@ -807,14 +807,6 @@ client.handleSelectMenuInteraction = async (interaction) => {
         } else {
             console.error('Signup command or handleCompSelection method not found');
         }
-    } else if (customId === 'event_create_month' || customId === 'event_create_day') {
-        console.log('Event create wizard select menu detected, routing to event command');
-        const eventCommand = client.commands.get('event');
-        if (eventCommand && eventCommand.handleSelectMenuInteraction) {
-            await eventCommand.handleSelectMenuInteraction(interaction, eventCommand.dbManager);
-        } else {
-            console.error('Event command or handleSelectMenuInteraction method not found');
-        }
     }
 };
 
