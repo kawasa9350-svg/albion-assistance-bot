@@ -702,7 +702,7 @@ module.exports = {
                     .setFooter({ text: 'Phoenix Assistance Bot • Event Created' })
                     .setTimestamp();
 
-                // Add composition details if one was selected
+            // Add composition details if one was selected
                 let selectedComp = null;
                 if (eventData.compName && eventData.compName !== '') {
                     try {
@@ -756,9 +756,19 @@ module.exports = {
                 let buttonRows = [];
                 if (selectedComp && selectedComp.builds && selectedComp.builds.length > 0) {
                     buttonRows = this.createBuildSignupButtons(selectedComp.builds, eventData.name, interaction.client.eventSignups, userId);
+
+                    // If we had to truncate due to Discord limits, add a note
+                    const maxButtons = 20;
+                    if (selectedComp.builds.length > maxButtons) {
+                        publicEventEmbed.addFields({
+                            name: '⚠️ **Note**',
+                            value: `Due to Discord limits, only the first ${maxButtons} builds have buttons. All builds are listed above.`,
+                            inline: false
+                        });
+                    }
                 }
 
-                // Send the public event announcement with buttons
+                // Send the public event announcement with buttons (ensure <= 5 component rows)
                 await interaction.channel.send({ 
                     embeds: [publicEventEmbed], 
                     components: buttonRows 
@@ -1101,47 +1111,40 @@ module.exports = {
         }
     },
 
-    // Create build sign-up buttons for the public event announcement
+    // Create build sign-up buttons (match signup.js style: numeric labels, 4 per row, max 5 rows)
     createBuildSignupButtons(builds, eventName, eventSignups = null, currentUserId = null) {
         const buttons = [];
         
+        if (!builds || !Array.isArray(builds) || builds.length === 0) {
+            return [];
+        }
+        
         builds.forEach((build, index) => {
-            const buildName = build.name || build;
             const signupKey = `event_${eventName}_build_${index}`;
             const signups = eventSignups?.get(signupKey) || [];
             const isTaken = signups.length > 0;
             const isTakenByCurrentUser = isTaken && currentUserId && signups.includes(currentUserId);
             
-            // Only show "Remove me" if the current user owns this build
-            // Otherwise show "Taken" for all other users
-            let buttonLabel;
-            if (isTaken) {
-                if (isTakenByCurrentUser) {
-                    buttonLabel = `${buildName} - Taken`;
-                } else {
-                    buttonLabel = `${buildName} - Taken`;
-                }
-            } else {
-                buttonLabel = `Sign up for ${buildName}`;
-            }
-            
+            const buildNumber = index + 1;
             const button = new ButtonBuilder()
                 .setCustomId(`event_signup_${eventName}_${index}`)
-                .setLabel(buttonLabel)
-                .setStyle(isTaken ? (isTakenByCurrentUser ? ButtonStyle.Danger : ButtonStyle.Secondary) : ButtonStyle.Primary)
-                .setEmoji(isTaken ? (isTakenByCurrentUser ? '❌' : '🔒') : '✅')
-                .setDisabled(false); // Always enabled so users can remove themselves
+                .setLabel(`${buildNumber}`)
+                .setStyle(isTaken ? ButtonStyle.Secondary : ButtonStyle.Primary)
+                .setEmoji(isTaken ? '🔒' : '✅')
+                .setDisabled(false);
             
             buttons.push(button);
         });
         
-        // Group buttons into rows of 3 (Discord limit)
+        // Group into rows of 4, limit to 5 rows (20 buttons)
         const buttonRows = [];
-        for (let i = 0; i < buttons.length; i += 3) {
-            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 3));
+        const maxRows = 5;
+        const maxButtons = maxRows * 4;
+        const buttonsToShow = buttons.slice(0, maxButtons);
+        for (let i = 0; i < buttonsToShow.length; i += 4) {
+            const row = new ActionRowBuilder().addComponents(buttonsToShow.slice(i, i + 4));
             buttonRows.push(row);
         }
-        
         return buttonRows;
     },
 
@@ -1300,6 +1303,16 @@ module.exports = {
                     value: `${event.compName}\n\n**Builds:**\n${buildList}`,
                     inline: false
                 });
+
+                // Discord component limit note when truncated
+                const maxButtons = 20;
+                if (composition.builds.length > maxButtons) {
+                    publicEventEmbed.addFields({
+                        name: '⚠️ **Note**',
+                        value: `Due to Discord limits, only the first ${maxButtons} builds have buttons. All builds are listed above.`,
+                        inline: false
+                    });
+                }
             }
 
             // Create build signup buttons - we need to pass the current user ID for proper button states
