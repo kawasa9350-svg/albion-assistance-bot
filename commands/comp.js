@@ -707,24 +707,14 @@ module.exports = {
                 return interaction.reply({ embeds: [embed], ephemeral: true });
             }
 
-            // Get the comp's content type from the stored comp list data
-            let compContentType = 'General'; // Default fallback
-            if (interaction.client.compListData) {
-                const listData = interaction.client.compListData.get(interaction.user.id);
-                if (listData && listData.contentType && listData.contentType !== 'all') {
-                    compContentType = listData.contentType;
-                }
-            }
-
-            // Store build data for editing with the comp's content type
+            // Store build data for editing (similar to build-edit.js)
             if (!interaction.client.editBuildData) {
                 interaction.client.editBuildData = new Map();
             }
             interaction.client.editBuildData.set(interaction.user.id, { 
                 build, 
                 originalName: buildName,
-                fromComp: true, // Flag to indicate this came from comp list
-                compContentType: compContentType // Store the comp's content type for filtering
+                fromComp: true // Flag to indicate this came from comp list
             });
 
             // Create edit options menu (same as build-edit.js)
@@ -758,7 +748,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle(`🔧 Editing: ${build.name}`)
-                .setDescription(`**Build editing from comp list**\n\n**Comp Content Type:** ${compContentType}\n\nSelect what you would like to edit:`)
+                .setDescription('**Build editing from comp list**\n\nSelect what you would like to edit:')
                 .addFields(
                     { name: 'Content Type', value: build.contentType || 'Not specified', inline: true },
                     { name: 'Weapon', value: build.weapon || 'Not specified', inline: true },
@@ -779,7 +769,7 @@ module.exports = {
                 components: [row], 
                 ephemeral: true 
             });
-            console.log(`Build edit interface opened for: ${buildName} from comp list (Content Type: ${compContentType})`);
+            console.log(`Build edit interface opened for: ${buildName} from comp list`);
             
         } catch (error) {
             console.error('Error in handleBuildEditFromComp:', error);

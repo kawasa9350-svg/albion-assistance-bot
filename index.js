@@ -1,1074 +1,861 @@
-const { Client, GatewayIntentBits, Collection, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const mongoose = require('mongoose');
-const fetch = require('node-fetch');
-const config = require('./config');
+const { Client, Collection, GatewayIntentBits, Events, InteractionType } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+const DatabaseManager = require('./database.js');
 
-// Debug logging
-console.log('🔍 Debug Info:');
-console.log('BOT_TOKEN exists:', !!process.env.BOT_TOKEN);
-console.log('BOT_TOKEN length:', process.env.BOT_TOKEN ? process.env.BOT_TOKEN.length : 'undefined');
-console.log('BOT_TOKEN starts with:', process.env.BOT_TOKEN ? process.env.BOT_TOKEN.substring(0, 10) + '...' : 'undefined');
-console.log('CLIENT_ID exists:', !!process.env.CLIENT_ID);
-console.log('CLIENT_ID value:', process.env.CLIENT_ID);
+// Load configuration
+const config = require('./config.js');
 
-const User = require('./models/User');
-const Composition = require('./models/Composition');
-const SignupSession = require('./models/SignupSession');
-
-// Create Discord client
+// Create Discord client with only allowed intents
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.GuildMessages
     ]
 });
 
-// Create commands collection
+// Create collections for commands
 client.commands = new Collection();
+client.cooldowns = new Collection();
 
-// Store comp creation data temporarily
-const compSessions = new Map();
+// Initialize database manager
+const dbManager = new DatabaseManager();
 
-// MongoDB Connection
-mongoose.connect(config.mongoUri)
-    .then(() => console.log('✅ Connected to MongoDB'))
-    .catch(err => console.error('❌ MongoDB connection error:', err));
+// Load commands
+const commandsPath = path.join(__dirname, 'commands');
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
+    
+    if ('data' in command && 'execute' in command) {
+        // Pass the database manager to the command
+        command.dbManager = dbManager;
+        client.commands.set(command.data.name, command);
+        console.log(`✅ Loaded command: ${command.data.name}`);
+    } else {
+        console.log(`⚠️ Command at ${filePath} is missing required properties`);
+    }
+}
 
 // Bot ready event
-client.once('ready', () => {
-    console.log(`✅ Bot is online as ${client.user.tag}`);
-    console.log(`📊 Serving ${client.guilds.cache.size} servers`);
-});
-
-// Slash command interaction handler
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-
-    const { commandName } = interaction;
-
-    if (commandName === 'register') {
-        await handleRegisterCommand(interaction);
-    } else if (commandName === 'lootsplit') {
-        await handleLootsplitCommand(interaction);
-    } else if (commandName === 'comp') {
-        await handleCompCommand(interaction);
-    } else if (commandName === 'signup') {
-        await handleSignupCommand(interaction);
-    }
-});
-
-// Register command handler
-async function handleRegisterCommand(interaction) {
-    try {
-        const selectedGuild = interaction.options.getString('guild');
-        const ingameName = interaction.options.getString('ingame_name').trim();
-        const guildConfig = config.guilds[selectedGuild];
+client.once(Events.ClientReady, async () => {
+    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+    
+    // Connect to database
+    const dbConnected = await dbManager.connect();
+    if (dbConnected) {
+        console.log('📊 Database connection established');
         
-        if (!guildConfig) {
-            await interaction.reply({ 
-                content: '❌ Invalid guild selection. Please try again.', 
-                ephemeral: true 
-            });
-            return;
+        // Load all event signups for all guilds to ensure we have current state after bot reset
+        await loadAllEventSignupsForAllGuilds();
+    } else {
+        console.log('❌ Failed to connect to database');
+    }
+    
+    // Set bot status
+    client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: 'WATCHING' });
+    
+    // Test event handler registration
+    console.log('🔧 Testing event handler registration...');
+    console.log(`MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
+});
+
+// Helper function to load all event signups for all guilds
+async function loadAllEventSignupsForAllGuilds() {
+    try {
+        console.log('🔄 Loading all event signups for all guilds...');
+        
+        // Initialize event signups storage if it doesn't exist
+        if (!client.eventSignups) {
+            client.eventSignups = new Map();
         }
-
-        // Validate in-game name
-        if (ingameName.length < 2 || ingameName.length > 20) {
-            await interaction.reply({ 
-                content: '❌ In-game name must be between 2 and 20 characters.', 
-                ephemeral: true 
-            });
-            return;
-        }
-
-        // Check if user has required role
-        const member = await interaction.guild.members.fetch(interaction.user.id);
-        const hasRequiredRole = !config.requiredRoleId || member.roles.cache.has(config.requiredRoleId);
-
-        // Update or create user in database
-        const userData = {
-            discordId: interaction.user.id,
-            username: interaction.user.username,
-            guild: selectedGuild,
-            ingameName: ingameName,
-            registeredAt: new Date(),
-            hasRequiredRole: hasRequiredRole
-        };
-
-        await User.findOneAndUpdate(
-            { discordId: interaction.user.id },
-            userData,
-            { upsert: true, new: true }
-        );
-
-        // Handle role assignment and nickname change
-        let roleAssigned = false;
-        let nicknameChanged = false;
-        let nicknameError = '';
-
-        if (hasRequiredRole) {
-            // Assign guild role
+        
+        // Get all guilds the bot is in
+        const guilds = client.guilds.cache;
+        console.log(`Found ${guilds.size} guilds`);
+        
+        // Load event signups for each guild
+        for (const [guildId, guild] of guilds) {
             try {
-                const role = interaction.guild.roles.cache.get(guildConfig.roleId);
-                if (role) {
-                    await member.roles.add(role);
-                    roleAssigned = true;
+                // Get all events for this guild
+                const events = await dbManager.getEvents(guildId);
+                console.log(`Loading signups for ${events.length} events in guild: ${guild.name}`);
+                
+                // Load signups for each event
+                for (const event of events) {
+                    const existingSignups = await dbManager.getEventSignups(guildId, event.name);
+                    existingSignups.forEach((signups, key) => {
+                        client.eventSignups.set(key, signups);
+                    });
+                    console.log(`Loaded ${existingSignups.size} signup entries for event: ${event.name} in guild: ${guild.name}`);
                 }
             } catch (error) {
-                console.error('Error assigning role:', error);
+                console.error(`Error loading event signups for guild ${guild.name}:`, error);
             }
+        }
+        
+        console.log(`✅ Total signup entries loaded across all guilds: ${client.eventSignups.size}`);
+    } catch (error) {
+        console.error('Error loading all event signups for all guilds:', error);
+    }
+}
 
-            // Change nickname with guild tag
-            try {
-                const newNickname = `${guildConfig.tag} ${ingameName}`;
-                await member.setNickname(newNickname);
-                nicknameChanged = true;
-            } catch (error) {
-                console.error('Error changing nickname:', error);
-                nicknameError = `Please manually change your nickname to: **${guildConfig.tag} ${ingameName}**`;
+// Message delete event - handle cleanup of signup and event data when messages are deleted
+client.on(Events.MessageDelete, async (message) => {
+    console.log(`🔍 MESSAGE DELETE EVENT TRIGGERED - Message ID: ${message.id}`);
+    
+    try {
+        console.log(`🔍 Message deletion detected:`, {
+            messageId: message.id,
+            guildId: message.guildId,
+            channelId: message.channelId,
+            authorId: message.author?.id,
+            isBotMessage: message.author?.id === client.user.id,
+            hasEmbeds: message.embeds && message.embeds.length > 0,
+            embedTitle: message.embeds?.[0]?.title || 'No title'
+        });
+        
+        // Check if this is a message from our bot
+        if (message.author && message.author.id === client.user.id && 
+            message.embeds && message.embeds.length > 0) {
+            
+            const embed = message.embeds[0];
+            const title = embed.title || '';
+            
+            console.log(`📝 Processing bot message deletion with title: "${title}"`);
+            
+            // Handle signup message deletion
+            if (title.startsWith('📝 Build Signup')) {
+                console.log('Signup message deleted, cleaning up database signups');
+                
+                // Extract composition name and session ID from the embed description
+                const description = embed.description || '';
+                const compNameMatch = description.match(/\*\*(.*?)\*\* - Available Builds/);
+                
+                if (compNameMatch && compNameMatch[1]) {
+                    const compName = compNameMatch[1];
+                    
+                    // Try to find the session ID from the message content or components
+                    let sessionId = null;
+                    if (message.components && message.components.length > 0) {
+                        // Look for session ID in button custom IDs
+                        for (const row of message.components) {
+                            for (const component of row.components) {
+                                if (component.customId && component.customId.startsWith('signup_comp_')) {
+                                    const parts = component.customId.split('_');
+                                    if (parts.length >= 4) {
+                                        sessionId = parts[3]; // sessionId is the 4th part
+                                        break;
+                                    }
+                                }
+                            }
+                            if (sessionId) break;
+                        }
+                    }
+                    
+                    if (sessionId) {
+                        console.log(`Cleaning up signups for composition: ${compName}, session: ${sessionId}`);
+                        
+                        // Clean up signups for this specific session from database
+                        await dbManager.cleanupCompositionSignups(message.guildId, compName, sessionId);
+                        
+                        // Also clean up from memory
+                        if (client.eventSignups) {
+                            for (const [key] of client.eventSignups) {
+                                if (key.startsWith(`comp_${compName}_${sessionId}_`)) {
+                                    client.eventSignups.delete(key);
+                                }
+                            }
+                        }
+                        
+                        console.log(`✅ Cleaned up signups for composition: ${compName}, session: ${sessionId}`);
+                    } else {
+                        console.log(`Could not determine session ID for composition: ${compName}, cleaning up all signups`);
+                        
+                        // Fallback: clean up all signups for this composition from database
+                        await dbManager.cleanupCompositionSignups(message.guildId, compName);
+                        
+                        // Also clean up from memory
+                        if (client.eventSignups) {
+                            for (const [key] of client.eventSignups) {
+                                if (key.startsWith(`comp_${compName}_`)) {
+                                    client.eventSignups.delete(key);
+                                }
+                            }
+                        }
+                        
+                        console.log(`✅ Cleaned up all signups for composition: ${compName}`);
+                    }
+                }
             }
+            
+            // Handle event message deletion
+            else if (title.includes('📅') || title.includes('**') || title.toLowerCase().includes('event')) {
+                console.log('🎯 EVENT MESSAGE DELETION DETECTED!');
+                console.log('Event message deleted, cleaning up database event and signups');
+                console.log(`Message details: Guild ID: ${message.guildId}, Title: "${title}"`);
+                
+                // Extract event name from the title (format: "📅 **Event Name**")
+                let eventName = null;
+                
+                // Try multiple patterns to extract event name
+                const patterns = [
+                    /\*\*(.*?)\*\*/, // **Event Name**
+                    /📅\s*\*\*(.*?)\*\*/, // 📅 **Event Name**
+                    /📅\s*(.+)/, // 📅 Event Name (without **)
+                    /(.+)/ // Any text as fallback
+                ];
+                
+                for (const pattern of patterns) {
+                    const match = title.match(pattern);
+                    if (match && match[1] && match[1].trim()) {
+                        eventName = match[1].trim();
+                        console.log(`Extracted event name using pattern ${pattern.source}: "${eventName}"`);
+                        break;
+                    }
+                }
+                
+                if (eventName) {
+                    console.log(`Final extracted event name: "${eventName}"`);
+                    console.log(`Cleaning up event and signups for event: ${eventName} in guild: ${message.guildId}`);
+                    
+                    try {
+                        // First, verify the event exists in the database
+                        const events = await dbManager.getEvents(message.guildId);
+                        const eventExists = events.find(e => e.name === eventName);
+                        console.log(`Event "${eventName}" exists in database: ${!!eventExists}`);
+                        
+                        if (eventExists) {
+                            console.log(`Event details:`, eventExists);
+                            
+                            // Clean up event signups from database
+                            console.log(`Cleaning up event signups...`);
+                            const signupCleanupResult = await dbManager.cleanupEventSignups(message.guildId, eventName);
+                            console.log(`Signup cleanup result: ${signupCleanupResult}`);
+                            
+                            // Delete the event itself from database
+                            console.log(`Deleting event from database...`);
+                            const deleteResult = await dbManager.deleteEvent(message.guildId, eventName);
+                            console.log(`Event deletion result: ${deleteResult}`);
+                            
+                            // Verify deletion
+                            const eventsAfterDelete = await dbManager.getEvents(message.guildId);
+                            const eventStillExists = eventsAfterDelete.find(e => e.name === eventName);
+                            console.log(`Event still exists after deletion: ${!!eventStillExists}`);
+                            
+                            // Also clean up from memory if it exists
+                            if (client.eventSignups) {
+                                let memoryCleanupCount = 0;
+                                for (const [key] of client.eventSignups) {
+                                    if (key.startsWith(`event_${eventName}_`)) {
+                                        client.eventSignups.delete(key);
+                                        memoryCleanupCount++;
+                                    }
+                                }
+                                console.log(`Cleaned up ${memoryCleanupCount} memory entries`);
+                            }
+                            
+                            console.log(`✅ Cleaned up event and signups for event: ${eventName}`);
+                        } else {
+                            console.log(`⚠️ Event "${eventName}" not found in database, trying fuzzy search...`);
+                            
+                            // Try fuzzy search through all events to find a match
+                            const allEvents = await dbManager.getEvents(message.guildId);
+                            const fuzzyMatch = allEvents.find(e => 
+                                e.name.toLowerCase().includes(eventName.toLowerCase()) ||
+                                eventName.toLowerCase().includes(e.name.toLowerCase())
+                            );
+                            
+                            if (fuzzyMatch) {
+                                console.log(`Found fuzzy match: "${fuzzyMatch.name}" for search term "${eventName}"`);
+                                eventName = fuzzyMatch.name; // Use the actual event name from database
+                                
+                                // Retry cleanup with the correct event name
+                                console.log(`🔄 Retrying cleanup with correct event name: "${eventName}"`);
+                                
+                                try {
+                                    const signupCleanupResult = await dbManager.cleanupEventSignups(message.guildId, eventName);
+                                    const deleteResult = await dbManager.deleteEvent(message.guildId, eventName);
+                                    
+                                    console.log(`Fuzzy match cleanup - Signup cleanup: ${signupCleanupResult}, Event deletion: ${deleteResult}`);
+                                    
+                                    if (deleteResult) {
+                                        console.log(`✅ Fuzzy match cleanup successful for event: ${eventName}`);
+                                    } else {
+                                        console.log(`❌ Fuzzy match cleanup failed for event: ${eventName}`);
+                                    }
+                                } catch (fuzzyError) {
+                                    console.error(`❌ Fuzzy match cleanup error:`, fuzzyError);
+                                }
+                            } else {
+                                console.log(`⚠️ No fuzzy match found for event name: "${eventName}"`);
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error cleaning up event ${eventName}:`, error);
+                        console.error('Full error details:', error);
+                        
+                        // Even if there's an error, try to force delete the event
+                        console.log(`🔄 Attempting force deletion of event: ${eventName}`);
+                        try {
+                            const forceDeleteResult = await dbManager.deleteEvent(message.guildId, eventName);
+                            console.log(`Force delete result: ${forceDeleteResult}`);
+                            
+                            if (forceDeleteResult) {
+                                console.log(`✅ Force deletion successful for event: ${eventName}`);
+                            } else {
+                                console.log(`❌ Force deletion failed for event: ${eventName}`);
+                            }
+                        } catch (forceError) {
+                            console.error(`❌ Force deletion error:`, forceError);
+                        }
+                    }
+                } else {
+                    console.log(`⚠️ Could not extract event name from title: "${title}"`);
+                    
+                    // Last resort: try to find any event that might match the title
+                    console.log(`🔄 Attempting last resort event search...`);
+                    try {
+                        const allEvents = await dbManager.getEvents(message.guildId);
+                        console.log(`Available events in guild:`, allEvents.map(e => e.name));
+                        
+                        // Look for any event that might be in the title
+                        for (const event of allEvents) {
+                            if (title.toLowerCase().includes(event.name.toLowerCase())) {
+                                console.log(`Found potential match: "${event.name}" in title: "${title}"`);
+                                
+                                // Try to delete this event
+                                const deleteResult = await dbManager.deleteEvent(message.guildId, event.name);
+                                console.log(`Last resort deletion result for "${event.name}": ${deleteResult}`);
+                                
+                                if (deleteResult) {
+                                    console.log(`✅ Last resort deletion successful for event: ${event.name}`);
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (lastResortError) {
+                        console.error(`❌ Last resort event search error:`, lastResortError);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error handling message delete for cleanup:', error);
+    }
+});
+
+// Interaction create event (slash commands, buttons, modals)
+client.on(Events.InteractionCreate, async interaction => {
+    try {
+        if (interaction.isChatInputCommand()) {
+            // Handle slash commands
+            const command = client.commands.get(interaction.commandName);
+            if (!command) {
+                console.error(`No command matching ${interaction.commandName} was found.`);
+                return;
+            }
+            await command.execute(interaction, command.dbManager);
+        } else if (interaction.isButton()) {
+            // Handle button interactions
+            await client.handleButtonInteraction(interaction);
+        } else if (interaction.isModalSubmit()) {
+            // Handle modal submissions
+            await client.handleModalSubmit(interaction);
+        } else if (interaction.isStringSelectMenu()) {
+            // Handle select menu interactions
+            await client.handleSelectMenuInteraction(interaction);
+        } else if (interaction.isAutocomplete()) {
+            // Handle autocomplete interactions
+            const command = client.commands.get(interaction.commandName);
+            if (!command) {
+                console.error(`No command matching ${interaction.commandName} was found.`);
+                return;
+            }
+            if (command.autocomplete) {
+                await command.autocomplete(interaction);
+            }
+        }
+    } catch (error) {
+        console.error(`Error handling interaction:`, error);
+        
+        const errorMessage = {
+            content: 'There was an error while processing this interaction!',
+            ephemeral: true
+        };
+
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(errorMessage);
         } else {
-            // Just change nickname without tag
-            try {
-                await member.setNickname(ingameName);
-                nicknameChanged = true;
-            } catch (error) {
-                console.error('Error changing nickname:', error);
-                nicknameError = `Please manually change your nickname to: **${ingameName}**`;
-            }
+            await interaction.reply(errorMessage);
         }
-
-        // Send confirmation
-        const confirmEmbed = new EmbedBuilder()
-            .setTitle('✅ Registration Successful!')
-            .setDescription(`Welcome to Onew Bang!`)
-            .setColor(guildConfig.color)
-            .addFields(
-                { name: 'In-Game Name', value: ingameName, inline: true },
-                { name: 'Guild', value: selectedGuild, inline: true },
-                { name: 'Role Assigned', value: roleAssigned ? '✅ Yes' : '❌ No (Missing required role)', inline: true },
-                { name: 'Nickname Changed', value: nicknameChanged ? '✅ Yes' : '❌ No (Bot lacks permission)', inline: true }
-            )
-            .setTimestamp();
-
-        // Add nickname instruction if there was an error
-        if (nicknameError) {
-            confirmEmbed.addFields({ name: '📝 Manual Action Required', value: nicknameError, inline: false });
-        }
-
-        await interaction.reply({ embeds: [confirmEmbed] });
-
-    } catch (error) {
-        console.error('Error in register command:', error);
-        await interaction.reply({ 
-            content: '❌ An error occurred while processing your registration. Please try again later.', 
-            ephemeral: true 
-        });
     }
-}
-
-// Lootsplit command handler
-async function handleLootsplitCommand(interaction) {
-    try {
-        const contentType = interaction.options.getString('content_type');
-        const usersInput = interaction.options.getString('users');
-        const callerInput = interaction.options.getString('caller');
-        const repairFees = interaction.options.getInteger('repair_fees');
-        const totalLoot = interaction.options.getInteger('total_loot');
-
-        // Get content type config
-        const contentConfig = config.contentTypes[contentType];
-        if (!contentConfig) {
-            await interaction.reply({ 
-                content: '❌ Invalid content type selected.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-
-        // Parse mentioned users from the users input string
-        const mentionRegex = /<@!?(\d+)>/g;
-        const mentionedUserIds = [];
-        let match;
-        
-        while ((match = mentionRegex.exec(usersInput)) !== null) {
-            mentionedUserIds.push(match[1]);
-        }
-
-        if (mentionedUserIds.length === 0) {
-            await interaction.reply({ 
-                content: '❌ Please mention the users participating in the loot split.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-
-        // Parse caller from the caller input string
-        if (!callerInput) {
-            await interaction.reply({ 
-                content: '❌ This command has been updated. Please use the new format: `/lootsplit content_type users caller total_loot`\n\n**New format:**\n- `content_type`: Type of content\n- `users`: Mention participating users\n- `caller`: Mention the caller\n- `total_loot`: Total loot value\n\nPlease try the command again with the updated format.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-        
-        const callerMatch = callerInput.match(/<@!?(\d+)>/);
-        if (!callerMatch) {
-            await interaction.reply({ 
-                content: '❌ Please mention the caller user.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-        const callerId = callerMatch[1];
-
-        // Fetch the mentioned users
-        const mentionedUsers = new Map();
-        for (const userId of mentionedUserIds) {
-            try {
-                const user = await client.users.fetch(userId);
-                mentionedUsers.set(userId, user);
-            } catch (error) {
-                console.error(`Error fetching user ${userId}:`, error);
-            }
-        }
-
-        // Fetch caller
-        let caller;
-        try {
-            caller = await client.users.fetch(callerId);
-        } catch (error) {
-            console.error(`Error fetching caller ${callerId}:`, error);
-            await interaction.reply({ 
-                content: '❌ Error fetching caller user.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-
-        // Check if all mentioned users are registered
-        const unregisteredUsers = [];
-        const registeredUsers = [];
-
-        for (const [userId, user] of mentionedUsers) {
-            const userData = await User.findOne({ discordId: userId });
-            if (userData) {
-                registeredUsers.push({
-                    user: user,
-                    ingameName: userData.ingameName,
-                    guild: userData.guild
-                });
-            } else {
-                unregisteredUsers.push(user);
-            }
-        }
-
-        // Check if caller is registered
-        const callerData = await User.findOne({ discordId: callerId });
-        if (!callerData) {
-            await interaction.reply({ 
-                content: `❌ The caller ${caller} needs to register first.\n\nPlease use \`/register\` to register before participating in loot splits.`,
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-
-        // If there are unregistered users, show error
-        if (unregisteredUsers.length > 0) {
-            const unregisteredMentions = unregisteredUsers.map(user => `<@${user.id}>`).join(', ');
-            await interaction.reply({ 
-                content: `❌ The following users need to register first: ${unregisteredMentions}\n\nPlease use \`/register\` to register before participating in loot splits.`,
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-
-        // Calculate loot split (repair fees subtracted first, then caller fee, no guild tax)
-        const lootAfterRepairFees = totalLoot - repairFees;
-        const callerFeeRate = config.callerFeeRate;
-        const callerFee = Math.floor(lootAfterRepairFees * callerFeeRate);
-        const lootAfterCallerFee = lootAfterRepairFees - callerFee;
-        const lootPerPerson = Math.floor(lootAfterCallerFee / registeredUsers.length);
-
-        // Group users by guild for per-guild totals
-        const guildTotals = {};
-        const guildPlayerCounts = {};
-        
-        // Count players per guild
-        registeredUsers.forEach(user => {
-            if (!guildPlayerCounts[user.guild]) {
-                guildPlayerCounts[user.guild] = 0;
-            }
-            guildPlayerCounts[user.guild]++;
-        });
-        
-        // Calculate per-guild totals (player payouts + caller fee if caller is from that guild)
-        Object.entries(guildPlayerCounts).forEach(([guild, playerCount]) => {
-            const totalPerGuild = lootPerPerson * playerCount;
-            // Add caller fee to the caller's guild
-            if (guild === callerData.guild) {
-                guildTotals[guild] = totalPerGuild + callerFee;
-            } else {
-                guildTotals[guild] = totalPerGuild;
-            }
-        });
-
-        // Create embed
-        const embed = new EmbedBuilder()
-            .setTitle(`💰 Loot Split - ${contentType}`)
-            .setColor(contentConfig.color)
-            .addFields(
-                { name: '📊 Summary', value: `**Total Loot:** ${totalLoot.toLocaleString()} silver\n**Repair Fees:** ${repairFees.toLocaleString()} silver\n**After Repairs:** ${lootAfterRepairFees.toLocaleString()} silver\n**Caller Fee (${(callerFeeRate * 100).toFixed(1)}%):** ${callerFee.toLocaleString()} silver\n**Per Person:** ${lootPerPerson.toLocaleString()} silver`, inline: false },
-                { name: '📢 Caller', value: `${caller} - ${callerData.guild}`, inline: false }
-            )
-            .setTimestamp();
-
-        // Add players list as proper mentions only
-        const playersList = registeredUsers.map(user => {
-            return `<@${user.user.id}> - ${user.guild}`;
-        }).join('\n');
-
-        embed.addFields({ name: '👥 Participants', value: playersList, inline: false });
-
-        // Add per guild totals
-        const perGuildTotals = Object.entries(guildTotals)
-            .map(([guild, total]) => `**${guild}:** ${total.toLocaleString()} silver (${guildPlayerCounts[guild]} players)`)
-            .join('\n');
-
-        embed.addFields({ name: '🏛️ Guild Breakdown', value: perGuildTotals, inline: false });
-
-        await interaction.reply({ embeds: [embed] });
-
-    } catch (error) {
-        console.error('Error in lootsplit command:', error);
-        await interaction.reply({ 
-            content: '❌ An error occurred while calculating the loot split. Please try again later.',
-            flags: 64 // Ephemeral flag
-        });
-    }
-}
-
-// Comp command handler
-async function handleCompCommand(interaction) {
-    try {
-        const subcommand = interaction.options.getSubcommand();
-        
-        if (subcommand === 'create') {
-            await handleCompCreateCommand(interaction);
-        } else if (subcommand === 'list') {
-            await handleCompListCommand(interaction);
-        }
-    } catch (error) {
-        console.error('Error in comp command:', error);
-        await interaction.reply({ 
-            content: '❌ An error occurred while processing the comp command. Please try again later.',
-            flags: 64 // Ephemeral flag
-        });
-    }
-}
-
-// Comp create command handler
-async function handleCompCreateCommand(interaction) {
-    try {
-        const contentType = interaction.options.getString('content_type');
-        
-        // Create step 1 embed - Enter comp name
-        const embed = new EmbedBuilder()
-            .setTitle('🎭 Comp Creation')
-            .setDescription('Step 2: Enter a name for your comp.')
-            .addFields({ name: 'Selected Content Type', value: contentType, inline: false })
-            .setColor('#0099ff')
-            .setFooter({ text: 'Phoenix Assistance Bot • Step 2 of 3 • Today at 1:40 PM' })
-            .setTimestamp();
-
-        // Create button for entering comp name
-        const enterNameButton = new ButtonBuilder()
-            .setCustomId('enter_comp_name')
-            .setLabel('Enter Comp Name')
-            .setStyle(ButtonStyle.Primary)
-            .setEmoji('📝');
-
-        const row = new ActionRowBuilder().addComponents(enterNameButton);
-
-        await interaction.reply({ 
-            embeds: [embed], 
-            components: [row],
-            ephemeral: true 
-        });
-        
-    } catch (error) {
-        console.error('Error in comp create command:', error);
-        await interaction.reply({ 
-            content: '❌ An error occurred while creating the composition. Please try again later.',
-            flags: 64 // Ephemeral flag
-        });
-    }
-}
-
-// Comp list command handler
-async function handleCompListCommand(interaction) {
-    try {
-        const compName = interaction.options.getString('comp');
-
-        if (!compName) {
-            await interaction.reply({
-                content: '❌ Please pick a comp, e.g. `/comp list comp:<your comp>`',
-                flags: 64
-            });
-            return;
-        }
-
-        const comp = await Composition.findOne({ name: compName });
-        if (!comp) {
-            await interaction.reply({
-                content: `❌ Comp "${compName}" not found.`,
-                flags: 64
-            });
-            return;
-        }
-
-        const rolesList = (comp.roles && comp.roles.length > 0)
-            ? comp.roles.map((role, index) => `${index + 1}. ${role}`).join('\n')
-            : 'No builds saved for this comp.';
-
-        const embed = new EmbedBuilder()
-            .setTitle(`📋 ${comp.name}`)
-            .addFields({ name: 'Available Builds', value: rolesList })
-            .setColor('#0099ff')
-            .setTimestamp();
-
-        await interaction.reply({ embeds: [embed], ephemeral: true });
-        
-    } catch (error) {
-        console.error('Error in comp list command:', error);
-        await interaction.reply({ 
-            content: '❌ An error occurred while fetching comps. Please try again later.',
-            flags: 64 // Ephemeral flag
-        });
-    }
-}
-
-// Signup autocomplete handler
-async function handleSignupAutocomplete(interaction) {
-    try {
-        console.log('Autocomplete triggered for signup command');
-        
-        // Get all comps from database
-        const comps = await Composition.find({})
-            .select('name')
-            .sort({ name: 1 })
-            .limit(25);
-        
-        console.log('Found comps in database:', comps.length);
-        
-        // Format choices for Discord
-        const choices = comps.map(comp => ({
-            name: comp.name,
-            value: comp.name
-        }));
-        
-        console.log('Sending choices to Discord:', choices.length);
-        
-        if (choices.length === 0) {
-            await interaction.respond([{
-                name: 'No comps found - Create one with /comp create',
-                value: 'no-comps-found'
-            }]);
-        } else {
-            await interaction.respond(choices);
-        }
-        
-    } catch (error) {
-        console.error('Error in signup autocomplete:', error);
-        await interaction.respond([{
-            name: 'Error loading comps',
-            value: 'error-loading'
-        }]);
-    }
-}
-
-// Signup command handler
-async function handleSignupCommand(interaction) {
-    try {
-        const compName = interaction.options.getString('comp');
-        
-        // Handle special cases
-        if (compName === 'no-comps-found' || compName === 'error-loading') {
-            await interaction.reply({ 
-                content: '❌ No comps found in database. Create a comp first with `/comp create`.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-        
-        // Find the comp in database
-        const comp = await Composition.findOne({ name: compName });
-        if (!comp) {
-            await interaction.reply({ 
-                content: `❌ Comp "${compName}" not found. Use \`/comp list\` to see available comps.`,
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-        
-        // Generate session ID
-        const sessionId = Math.random().toString(36).substring(2, 15);
-        
-        // Create signup session
-        const signupSession = new SignupSession({
-            sessionId: sessionId,
-            compId: comp._id,
-            compName: comp.name,
-            roles: comp.roles.map(role => ({
-                roleName: role,
-                signups: []
-            })),
-            createdBy: {
-                discordId: interaction.user.id,
-                username: interaction.user.username
-            }
-        });
-        
-        await signupSession.save();
-        
-        // Add roles list
-        const rolesList = comp.roles.map((role, index) => 
-            `${index + 1}. ${role} - No signups`
-        ).join('\n');
-        
-        // Create signup embed
-        const embed = new EmbedBuilder()
-            .setTitle(`📝 Build Signup - 0/${comp.roles.length}`)
-            .addFields(
-                { name: `${comp.name} - Available Builds`, value: '', inline: false },
-                { name: '💜 Available Builds', value: rolesList, inline: false }
-            )
-            .setColor('#E74C3C')
-            .setFooter({ text: `Phoenix Assistance Bot • Click buttons below to sign up • Session: ${sessionId} • Today at 1:52 PM` })
-            .setTimestamp();
-        
-        // Create buttons for each role
-        const buttons = [];
-        comp.roles.forEach((role, index) => {
-            const button = new ButtonBuilder()
-                .setCustomId(`signup_${sessionId}_${index}`)
-                .setLabel(`${index + 1}`)
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('✅');
-            buttons.push(button);
-        });
-        
-        // Split buttons into rows of 4
-        const buttonRows = [];
-        for (let i = 0; i < buttons.length; i += 4) {
-            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 4));
-            buttonRows.push(row);
-        }
-        
-        await interaction.reply({ 
-            embeds: [embed], 
-            components: buttonRows
-        });
-        
-    } catch (error) {
-        console.error('Error in signup command:', error);
-        await interaction.reply({ 
-            content: '❌ An error occurred while creating the signup session. Please try again later.',
-            flags: 64 // Ephemeral flag
-        });
-    }
-}
+});
 
 // Handle button interactions
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isButton()) return;
-
-    if (interaction.customId === 'enter_comp_name') {
-        // Create modal for comp name
-        const modal = new ModalBuilder()
-            .setCustomId('comp_name_modal')
-            .setTitle('Enter Comp Name');
-
-        const nameInput = new TextInputBuilder()
-            .setCustomId('comp_name')
-            .setLabel('Comp Name')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Enter your comp name...')
-            .setRequired(true)
-            .setMaxLength(50);
-
-        const actionRow = new ActionRowBuilder().addComponents(nameInput);
-        modal.addComponents(actionRow);
-
-        await interaction.showModal(modal);
-    } else if (interaction.customId.startsWith('add_build_')) {
-        const sessionId = interaction.customId.replace('add_build_', '');
+client.handleButtonInteraction = async (interaction) => {
+    console.log(`Button clicked: ${interaction.customId} by user ${interaction.user.id}`);
+    
+    // Find the command that created this button by checking custom IDs
+    const customId = interaction.customId;
+    
+    if (customId.startsWith('build_') || customId === 'weapon' || customId === 'offhand' || 
+        customId === 'cape' || customId === 'head' || customId === 'chest' || 
+        customId === 'shoes' || customId === 'food' || customId === 'potion' || 
+        customId === 'content_type' || customId === 'create_build' || customId === 'cancel_build') {
         
-        // Create modal for adding build
-        const modal = new ModalBuilder()
-            .setCustomId(`add_build_modal_${sessionId}`)
-            .setTitle('Add Build to Comp');
-
-        const buildInput = new TextInputBuilder()
-            .setCustomId('build_name')
-            .setLabel('Build Name')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Enter build name...')
-            .setRequired(true)
-            .setMaxLength(100);
-
-        const actionRow = new ActionRowBuilder().addComponents(buildInput);
-        modal.addComponents(actionRow);
-
-        await interaction.showModal(modal);
-    } else if (interaction.customId.startsWith('create_comp_')) {
-        const sessionId = interaction.customId.replace('create_comp_', '');
-        const session = compSessions.get(sessionId);
+        console.log('Build button detected, routing to build command');
         
-        if (session) {
-            // Save to database
-            try {
-                await Composition.create({
-                    name: session.compName,
-                    roles: session.builds,
-                    createdBy: {
-                        discordId: session.userId,
-                        username: interaction.user.username
-                    }
-                });
-                
-                compSessions.delete(sessionId);
-                await interaction.update({ 
-                    content: '✅ Comp created and saved successfully!', 
-                    components: [],
-                    embeds: []
-                });
-            } catch (error) {
-                console.error('Error saving comp:', error);
-                await interaction.reply({ 
-                    content: '❌ Error saving comp to database.', 
-                    ephemeral: true 
-                });
-            }
-        }
-    } else if (interaction.customId.startsWith('cancel_comp_')) {
-        const sessionId = interaction.customId.replace('cancel_comp_', '');
-        compSessions.delete(sessionId);
-        
-        await interaction.update({ 
-            content: '❌ Comp creation cancelled.', 
-            components: [],
-            embeds: []
-        });
-    } else if (interaction.customId.startsWith('signup_')) {
-        // Handle signup button clicks
-        const parts = interaction.customId.split('_');
-        const sessionId = parts[1];
-        const roleIndex = parseInt(parts[2]);
-        
-        // Find the signup session
-        const session = await SignupSession.findOne({ sessionId: sessionId });
-        if (!session) {
-            await interaction.reply({ 
-                content: '❌ Signup session not found or expired.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-        
-        // Check if user is registered
-        const userData = await User.findOne({ discordId: interaction.user.id });
-        if (!userData) {
-            await interaction.reply({ 
-                content: '❌ You need to register first with `/register` before signing up.',
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-        
-        // Check if user is already signed up for this role
-        const role = session.roles[roleIndex];
-        const existingSignup = role.signups.find(signup => signup.userId === interaction.user.id);
-        
-        // If role is taken by someone else, show error
-        if (role.signups.length > 0 && !existingSignup) {
-            await interaction.reply({ 
-                content: `❌ This role is already taken by **${role.signups[0].ingameName}**! Only one person can sign up per role.`,
-                flags: 64 // Ephemeral flag
-            });
-            return;
-        }
-        
-        if (existingSignup) {
-            // Remove signup
-            role.signups = role.signups.filter(signup => signup.userId !== interaction.user.id);
-            await session.save();
+        // This is a build creation button
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleButtonInteraction) {
+            await buildCommand.handleButtonInteraction(interaction, buildCommand.dbManager);
         } else {
-            // Check if user is already signed up for any other role
-            const userAlreadySignedUp = session.roles.some(r => 
-                r.signups.some(signup => signup.userId === interaction.user.id)
-            );
-            
-            if (userAlreadySignedUp) {
-                await interaction.reply({ 
-                    content: `❌ You're already signed up for another role! Please remove yourself from your current role first before signing up for a new one.`,
-                    flags: 64 // Ephemeral flag
-                });
-                return;
-            }
-            
-            // Check if this role already has someone signed up
-            if (role.signups.length > 0) {
-                await interaction.reply({ 
-                    content: `❌ This role is already taken by **${role.signups[0].ingameName}**! Only one person can sign up per role.`,
-                    flags: 64 // Ephemeral flag
-                });
-                return;
-            }
-            
-            // Add signup
-            role.signups.push({
-                userId: interaction.user.id,
-                username: interaction.user.username,
-                ingameName: userData.ingameName,
-                guild: userData.guild
-            });
-            await session.save();
+            console.error('Build command or handleButtonInteraction method not found');
         }
+    } else if (customId.startsWith('delete_') || customId === 'confirm_delete_build') {
+        console.log('Delete button detected, routing to build command');
         
-        // Update the public embed without sending ephemeral message
-        await updateSignupEmbed(interaction, session);
-    }
-});
-
-// Handle modal interactions
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isModalSubmit()) return;
-
-    if (interaction.customId === 'comp_name_modal') {
-        const compName = interaction.fields.getTextInputValue('comp_name');
-        
-        // Store comp session data
-        const sessionId = `${interaction.user.id}_${Date.now()}`;
-        compSessions.set(sessionId, {
-            compName: compName,
-            contentType: 'Shitters Roam', // This should come from the original command
-            builds: [],
-            userId: interaction.user.id
-        });
-        
-        // Create step 2 embed - Add builds
-        const embed = new EmbedBuilder()
-            .setTitle('💚🎭 Add Builds to Comp')
-            .addFields(
-                { name: 'Comp', value: compName, inline: false },
-                { name: 'Content Type', value: 'Shitters Roam', inline: false },
-                { name: 'Current Builds (0/20)', value: 'No builds added yet', inline: false },
-                { 
-                    name: 'Instructions', 
-                    value: '• Click "✏️ Add Build" to manually type a build name\n• You can type any build name\n• You can add the same build multiple times for variations\n• Builds will be added in the order you enter them',
-                    inline: false 
-                }
-            )
-            .setColor('#0099ff')
-            .setFooter({ text: 'Phoenix Assistance Bot • Type build names manually • Today at 1:41 PM' })
-            .setTimestamp();
-
-        // Create buttons
-        const addBuildButton = new ButtonBuilder()
-            .setCustomId(`add_build_${sessionId}`)
-            .setLabel('Add Build')
-            .setStyle(ButtonStyle.Primary)
-            .setEmoji('✏️');
-
-        const createCompButton = new ButtonBuilder()
-            .setCustomId(`create_comp_${sessionId}`)
-            .setLabel('Create Comp')
-            .setStyle(ButtonStyle.Success)
-            .setEmoji('✅');
-
-        const cancelButton = new ButtonBuilder()
-            .setCustomId(`cancel_comp_${sessionId}`)
-            .setLabel('Cancel')
-            .setStyle(ButtonStyle.Danger)
-            .setEmoji('❌');
-
-        const row = new ActionRowBuilder().addComponents(addBuildButton, createCompButton, cancelButton);
-
-        await interaction.update({ 
-            embeds: [embed], 
-            components: [row]
-        });
-    } else if (interaction.customId.startsWith('add_build_modal_')) {
-        const sessionId = interaction.customId.replace('add_build_modal_', '');
-        const buildName = interaction.fields.getTextInputValue('build_name');
-        const session = compSessions.get(sessionId);
-        
-        if (session) {
-            // Add build to session
-            session.builds.push(buildName);
-            
-            // Update embed with new build count
-            const buildsList = session.builds.length > 0 ? session.builds.map((build, index) => `${index + 1}. ${build}`).join('\n') : 'No builds added yet';
-            
-            const embed = new EmbedBuilder()
-                .setTitle('💚🎭 Add Builds to Comp')
-                .addFields(
-                    { name: 'Comp', value: session.compName, inline: false },
-                    { name: 'Content Type', value: session.contentType, inline: false },
-                    { name: `Current Builds (${session.builds.length}/20)`, value: buildsList, inline: false },
-                    { 
-                        name: 'Instructions', 
-                        value: '• Click "✏️ Add Build" to manually type a build name\n• You can type any build name\n• You can add the same build multiple times for variations\n• Builds will be added in the order you enter them',
-                        inline: false 
-                    }
-                )
-                .setColor('#0099ff')
-                .setFooter({ text: 'Phoenix Assistance Bot • Type build names manually • Today at 1:41 PM' })
-                .setTimestamp();
-
-            // Create buttons with session ID
-            const addBuildButton = new ButtonBuilder()
-                .setCustomId(`add_build_${sessionId}`)
-                .setLabel('Add Build')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('✏️');
-
-            const createCompButton = new ButtonBuilder()
-                .setCustomId(`create_comp_${sessionId}`)
-                .setLabel('Create Comp')
-                .setStyle(ButtonStyle.Success)
-                .setEmoji('✅');
-
-            const cancelButton = new ButtonBuilder()
-                .setCustomId(`cancel_comp_${sessionId}`)
-                .setLabel('Cancel')
-                .setStyle(ButtonStyle.Danger)
-                .setEmoji('❌');
-
-            const row = new ActionRowBuilder().addComponents(addBuildButton, createCompButton, cancelButton);
-
-            await interaction.update({ 
-                embeds: [embed], 
-                components: [row]
-            });
+        // This is a delete button
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleDeleteInteraction) {
+            await buildCommand.handleDeleteInteraction(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleDeleteInteraction method not found');
         }
-    }
-});
-
-// Handle autocomplete interactions
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isAutocomplete()) return;
-
-    if (interaction.commandName === 'signup') {
-        await handleSignupAutocomplete(interaction);
-    } else if (interaction.commandName === 'comp') {
-        // Reuse same autocomplete for comp list subcommand
-        await handleSignupAutocomplete(interaction);
-    }
-});
-
-// Update signup embed function
-async function updateSignupEmbed(interaction, session) {
-    try {
-        // Calculate total signups
-        const totalSignups = session.roles.reduce((total, role) => total + role.signups.length, 0);
+    } else if (customId.startsWith('comp_')) {
+        console.log('Comp button detected, routing to comp command');
         
-        // Add roles list with signups
-        const rolesList = session.roles.map((role, index) => {
-            if (role.signups.length === 0) {
-                return `${index + 1}. ${role.roleName} - No signups`;
+        // Check if this is a comp delete interaction
+        if (customId.startsWith('comp_delete_') || customId === 'comp_confirm_delete' || customId === 'comp_cancel_delete') {
+            console.log('Comp delete interaction detected, routing to comp delete handler');
+            const compCommand = client.commands.get('comp');
+            if (compCommand && compCommand.handleDeleteInteraction) {
+                await compCommand.handleDeleteInteraction(interaction, compCommand.dbManager);
             } else {
-                const signupList = role.signups.map(signup => {
-                    return `<@${signup.userId}>`;
-                }).join(', ');
-                return `${index + 1}. ${role.roleName} - ${signupList}`;
+                console.error('Comp command or handleDeleteInteraction method not found');
             }
-        }).join('\n');
-        
-        // Create updated embed
-        const embed = new EmbedBuilder()
-            .setTitle(`📝 Build Signup - ${totalSignups}/${session.roles.length}`)
-            .addFields(
-                { name: `${session.compName} - Available Builds`, value: '', inline: false },
-                { name: '💜 Available Builds', value: rolesList, inline: false }
-            )
-            .setColor('#E74C3C')
-            .setFooter({ text: `Assistance Bot • Click buttons below to sign up • Session: ${session.sessionId} • Today at 1:52 PM` })
-            .setTimestamp();
-        
-        // Create updated buttons
-        const buttons = [];
-        session.roles.forEach((role, index) => {
-            const isRoleTaken = role.signups.length > 0;
-            
-            let buttonStyle, emoji;
-            
-            if (isRoleTaken) {
-                // Role is taken - show lock button with muted style
-                buttonStyle = ButtonStyle.Secondary;
-                emoji = '🔒';
+        } else {
+            // This is a regular comp button
+            const compCommand = client.commands.get('comp');
+            if (compCommand && compCommand.handleButtonInteraction) {
+                await compCommand.handleButtonInteraction(interaction, compCommand.dbManager);
             } else {
-                // Role is available - show checkmark button with muted style
-                buttonStyle = ButtonStyle.Secondary;
-                emoji = '✅';
+                console.error('Comp command or handleButtonInteraction method not found');
             }
-            
-            const button = new ButtonBuilder()
-                .setCustomId(`signup_${session.sessionId}_${index}`)
-                .setLabel(`${index + 1}`)
-                .setStyle(buttonStyle)
-                .setEmoji(emoji)
-                .setDisabled(false); // All buttons are enabled
-            buttons.push(button);
-        });
-        
-        // Split buttons into rows of 4
-        const buttonRows = [];
-        for (let i = 0; i < buttons.length; i += 4) {
-            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 4));
-            buttonRows.push(row);
         }
+    } else if (customId.startsWith('event_')) {
+        console.log('Event button detected, routing to event command');
         
-        await interaction.update({ 
-            embeds: [embed], 
-            components: buttonRows
-        });
-        
-    } catch (error) {
-        console.error('Error updating signup embed:', error);
-    }
-}
-
-// Enhanced error handling and memory management
-client.on('error', (error) => {
-    console.error('❌ Discord Client Error:', error);
-});
-
-client.on('warn', (warning) => {
-    console.warn('⚠️ Discord Client Warning:', warning);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-    console.error('❌ Uncaught Exception:', error);
-    // Don't exit the process, just log the error
-});
-
-// Memory usage monitoring
-setInterval(() => {
-    const memUsage = process.memoryUsage();
-    const memUsageMB = {
-        rss: Math.round(memUsage.rss / 1024 / 1024 * 100) / 100,
-        heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024 * 100) / 100,
-        heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024 * 100) / 100,
-        external: Math.round(memUsage.external / 1024 / 1024 * 100) / 100
-    };
-    
-    // Log memory usage every 30 minutes
-    console.log('📊 Memory Usage (MB):', memUsageMB);
-    
-    // Force garbage collection if memory usage is high
-    if (memUsageMB.heapUsed > 100) { // More than 100MB
-        if (global.gc) {
-            global.gc();
-            console.log('🗑️ Garbage collection triggered');
-        }
-    }
-}, 30 * 60 * 1000); // Every 30 minutes
-
-// Create a robust HTTP server for Render with health checks
-const http = require('http');
-const url = require('url');
-
-const server = http.createServer((req, res) => {
-    const parsedUrl = url.parse(req.url, true);
-    const path = parsedUrl.pathname;
-    
-    // Set CORS headers for monitoring services
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    if (req.method === 'OPTIONS') {
-        res.writeHead(200);
-        res.end();
-        return;
-    }
-    
-    if (path === '/health' || path === '/ping' || path === '/') {
-        // Health check endpoint for monitoring services
-        const healthData = {
-            status: 'online',
-            timestamp: new Date().toISOString(),
-            uptime: process.uptime(),
-            memory: process.memoryUsage(),
-            discordStatus: client.isReady() ? 'connected' : 'disconnected',
-            guilds: client.guilds?.cache?.size || 0
-        };
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(healthData, null, 2));
-    } else if (path === '/status') {
-        // Simple status endpoint
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('Discord Bot is running!');
-    } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not Found');
-    }
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`🌐 HTTP server running on port ${PORT}`);
-    console.log(`🏥 Health check available at: http://localhost:${PORT}/health`);
-    console.log(`📊 Status endpoint: http://localhost:${PORT}/status`);
-});
-
-// Self-pinging mechanism to keep bot alive on Render
-let selfPingInterval;
-const startSelfPing = () => {
-    const pingUrl = `http://localhost:${PORT}/health`;
-    
-    selfPingInterval = setInterval(async () => {
-        try {
-            const response = await fetch(pingUrl);
-            if (response.ok) {
-                console.log('🔄 Self-ping successful - Bot is alive');
+        // Check if this is a build signup button
+        if (customId.startsWith('event_signup_')) {
+            console.log('Event signup button detected, routing to event signup handler');
+            const eventCommand = client.commands.get('event');
+            if (eventCommand && eventCommand.handleBuildSignup) {
+                await eventCommand.handleBuildSignup(interaction, eventCommand.dbManager);
             } else {
-                console.log('⚠️ Self-ping failed - Response not OK');
+                console.error('Event command or handleBuildSignup method not found');
             }
-        } catch (error) {
-            console.error('❌ Self-ping error:', error.message);
+        } else {
+            // This is a regular event button
+            const eventCommand = client.commands.get('event');
+            if (eventCommand && eventCommand.handleButtonInteraction) {
+                await eventCommand.handleButtonInteraction(interaction, eventCommand.dbManager);
+            } else {
+                console.error('Event command or handleButtonInteraction method not found');
+            }
         }
-    }, 5 * 60 * 1000); // Ping every 5 minutes
-    
-    console.log('🔄 Self-ping mechanism started (every 5 minutes)');
+    } else if (customId.startsWith('signup_comp_')) {
+        console.log('Signup button detected, routing to signup command');
+        
+        // This is a signup build button
+        const signupCommand = client.commands.get('signup');
+        if (signupCommand && signupCommand.handleBuildSignup) {
+            await signupCommand.handleBuildSignup(interaction, signupCommand.dbManager);
+        } else {
+            console.error('Signup command or handleBuildSignup method not found');
+        }
+    } else if (customId.startsWith('confirm_wipe_attendance') || customId.startsWith('cancel_wipe_attendance')) {
+        console.log('Attendance button detected, routing to attendance command');
+        
+        // This is an attendance button
+        const attendanceCommand = client.commands.get('attendance');
+        if (attendanceCommand && attendanceCommand.handleButtonInteraction) {
+            await attendanceCommand.handleButtonInteraction(interaction, attendanceCommand.dbManager);
+        } else {
+            console.error('Attendance command or handleButtonInteraction method not found');
+        }
+    } else if (customId.startsWith('leaderboard_') || customId === 'first' || customId === 'prev' || customId === 'next' || customId === 'last') {
+        console.log('Leaderboard button detected, routing to leaderboard command');
+        
+        // This is a leaderboard button
+        const leaderboardCommand = client.commands.get('leaderboard');
+        if (leaderboardCommand && leaderboardCommand.handleButtonInteraction) {
+            await leaderboardCommand.handleButtonInteraction(interaction, leaderboardCommand.dbManager);
+        } else {
+            console.error('Leaderboard command or handleButtonInteraction method not found');
+        }
+    }
 };
 
-// Start self-ping after server is ready
-server.on('listening', () => {
-    startSelfPing();
+// Handle modal submissions
+client.handleModalSubmit = async (interaction) => {
+    console.log(`Modal submitted: ${interaction.customId} by user ${interaction.user.id}`);
+    
+    const customId = interaction.customId;
+    
+    if (customId.startsWith('modal_')) {
+        console.log('Build modal detected, routing to build command');
+        
+        // This is a build creation modal
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleModalSubmit) {
+            await buildCommand.handleModalSubmit(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleModalSubmit method not found');
+        }
+    } else if (customId === 'list_name_filter_modal') {
+        console.log('List name filter modal detected, routing to build command');
+        
+        // This is a list name filter modal
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleListNameFilterModal) {
+            await buildCommand.handleListNameFilterModal(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleListNameFilterModal method not found');
+        }
+    } else if (customId === 'delete_name_filter_modal') {
+        console.log('Delete name filter modal detected, routing to build command');
+        
+        // This is a delete name filter modal
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleListNameFilterModal) {
+            await buildCommand.handleListNameFilterModal(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleListNameFilterModal method not found');
+        }
+    } else if (customId.startsWith('comp_modal_')) {
+        console.log('Comp modal detected, routing to comp command');
+        
+        // This is a comp modal
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleModalSubmit) {
+            await compCommand.handleModalSubmit(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleModalSubmit method not found');
+        }
+    } else if (customId.startsWith('event_modal_')) {
+        console.log('Event modal detected, routing to event command');
+        
+        // This is an event modal
+        const eventCommand = client.commands.get('event');
+        if (eventCommand && eventCommand.handleModalSubmit) {
+            await eventCommand.handleModalSubmit(interaction, eventCommand.dbManager);
+        } else {
+            console.error('Event command or handleModalSubmit method not found');
+        }
+    } else if (customId.startsWith('build_edit_modal_')) {
+        console.log('Build edit modal detected, routing to build-edit command');
+        
+        // This is a build edit modal
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handleEditModalSubmit) {
+            await buildEditCommand.handleEditModalSubmit(interaction, buildEditCommand.dbManager);
+        } else {
+            console.error('Build-edit command or handleEditModalSubmit method not found');
+        }
+    }
+};
+
+// Handle select menu interactions
+client.handleSelectMenuInteraction = async (interaction) => {
+    console.log(`Select menu interaction: ${interaction.customId} by user ${interaction.user.id}`);
+    
+    const customId = interaction.customId;
+    
+    if (customId === 'content_type_select') {
+        console.log('Content type select menu detected, routing to build command');
+        
+        // This is a build creation content type selection
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleButtonInteraction) {
+            // We'll reuse the button interaction handler for select menus
+            await buildCommand.handleButtonInteraction(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleButtonInteraction method not found');
+        }
+    } else if (customId === 'list_content_type_select') {
+        console.log('List content type select menu detected, routing to build command');
+        
+        // This is a list content type selection
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleListInteraction) {
+            await buildCommand.handleListInteraction(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleListInteraction method not found');
+        }
+    } else if (customId === 'delete_content_type_select') {
+        console.log('Delete content type select menu detected, routing to build command');
+        
+        // This is a delete content type selection
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleDeleteInteraction) {
+            await buildCommand.handleDeleteInteraction(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleDeleteInteraction method not found');
+        }
+    } else if (customId === 'list_build_name_select') {
+        console.log('List build name select menu detected, routing to build command');
+        
+        // This is a list build name selection
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleListInteraction) {
+            await buildCommand.handleListInteraction(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleListInteraction method not found');
+        }
+    } else if (customId === 'delete_build_name_select') {
+        console.log('Delete build name select menu detected, routing to build command');
+        
+        // This is a delete build name selection
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleDeleteInteraction) {
+            await buildCommand.handleDeleteInteraction(interaction, buildCommand.dbManager);
+        } else {
+            console.error('Build command or handleDeleteInteraction method not found');
+        }
+    } else if (customId === 'comp_content_type_select') {
+        console.log('Comp content type select menu detected, routing to comp command');
+        
+        // This is a comp content type selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleButtonInteraction) {
+            await compCommand.handleButtonInteraction(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleButtonInteraction method not found');
+        }
+    } else if (customId === 'comp_build_select') {
+        console.log('Comp build select menu detected, routing to comp command');
+        
+        // This is a comp build selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleBuildSelection) {
+            await compCommand.handleBuildSelection(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleBuildSelection method not found');
+        }
+    } else if (customId === 'comp_list_content_type_select') {
+        console.log('Comp list content type select menu detected, routing to comp command');
+        
+        // This is a comp list content type selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleListInteraction) {
+            await compCommand.handleListInteraction(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleListInteraction method not found');
+        }
+    } else if (customId === 'comp_list_name_select') {
+        console.log('Comp list name select menu detected, routing to comp command');
+        
+        // This is a comp list name selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleListInteraction) {
+            await compCommand.handleListInteraction(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleListInteraction method not found');
+        }
+    } else if (customId === 'comp_lock_content_type_select') {
+        console.log('Comp lock content type select menu detected, routing to comp command');
+        
+        // This is a comp lock content type selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleLockInteraction) {
+            await compCommand.handleLockInteraction(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleLockInteraction method not found');
+        }
+    } else if (customId === 'comp_lock_comp_select') {
+        console.log('Comp lock comp select menu detected, routing to comp command');
+        
+        // This is a comp lock comp selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleLockCompSelection) {
+            await compCommand.handleLockCompSelection(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleLockCompSelection method not found');
+        }
+    } else if (customId === 'comp_delete_content_type_select') {
+        console.log('Comp delete content type select menu detected, routing to comp command');
+        
+        // This is a comp delete content type selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleDeleteInteraction) {
+            await compCommand.handleDeleteInteraction(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleDeleteInteraction method not found');
+        }
+    } else if (customId === 'comp_delete_name_select') {
+        console.log('Comp delete name select menu detected, routing to comp command');
+        
+        // This is a comp delete name selection
+        const compCommand = client.commands.get('comp');
+        if (compCommand && compCommand.handleDeleteInteraction) {
+            await compCommand.handleDeleteInteraction(interaction, compCommand.dbManager);
+        } else {
+            console.error('Comp command or handleDeleteInteraction method not found');
+        }
+    } else if (customId === 'build_edit_content_type_select') {
+        console.log('Build edit content type select menu detected, routing to build-edit command');
+        
+        // This is a build edit content type selection
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handleContentTypeSelection) {
+            await buildEditCommand.handleContentTypeSelection(interaction, buildEditCommand.dbManager);
+        } else {
+            console.error('Build-edit command or handleContentTypeSelection method not found');
+        }
+    } else if (customId === 'build_edit_content_type_edit_select') {
+        console.log('Build edit content type edit select menu detected, routing to build-edit command');
+        
+        // This is a build edit content type editing selection
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handleContentTypeDropdownSelection) {
+            await buildEditCommand.handleContentTypeDropdownSelection(interaction, buildEditCommand.dbManager);
+        } else {
+            console.error('Build-edit command or handleContentTypeDropdownSelection method not found');
+        }
+    } else if (customId === 'build_edit_select') {
+        console.log('Build edit select menu detected, routing to build-edit command');
+        
+        // This is a build edit selection
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handleBuildEditInteraction) {
+            await buildEditCommand.handleBuildEditInteraction(interaction, buildEditCommand.dbManager);
+        } else {
+            console.error('Build-edit command or handleBuildEditInteraction method not found');
+        }
+    } else if (customId === 'build_edit_field_select') {
+        console.log('Build edit field select menu detected, routing to build-edit command');
+        
+        // This is a build edit field selection
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handleFieldEditSelection) {
+            await buildEditCommand.handleFieldEditSelection(interaction, buildEditCommand.dbManager);
+        } else {
+            console.error('Build-edit command or handleFieldEditSelection method not found');
+        }
+    } else if (customId === 'build_edit_content_type_select') {
+        console.log('Build edit content type select menu detected, routing to build-edit command');
+        
+        // This is a build edit content type selection
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handleContentTypeDropdownSelection) {
+            await buildEditCommand.handleContentTypeDropdownSelection(interaction, buildEditCommand.dbManager);
+        } else {
+            console.error('Build-edit command or handleContentTypeDropdownSelection method not found');
+        }
+    } else if (customId === 'event_content_type_select') {
+        console.log('Event content type select menu detected, routing to event command');
+        
+        // This is an event content type selection
+        const eventCommand = client.commands.get('event');
+        if (eventCommand && eventCommand.handleContentTypeSelection) {
+            await eventCommand.handleContentTypeSelection(interaction, eventCommand.dbManager);
+        } else {
+            console.error('Event command or handleContentTypeSelection method not found');
+        }
+    } else if (customId === 'event_comp_select') {
+        console.log('Event comp select menu detected, routing to event command');
+        
+        // This is an event composition selection
+        const eventCommand = client.commands.get('event');
+        if (eventCommand && eventCommand.handleCompSelection) {
+            await eventCommand.handleCompSelection(interaction, eventCommand.dbManager);
+        } else {
+            console.error('Event command or handleCompSelection method not found');
+        }
+    } else if (customId === 'event_cancel_select') {
+        console.log('Event cancel select menu detected, routing to event command');
+        
+        // This is an event cancellation selection
+        const eventCommand = client.commands.get('event');
+        if (eventCommand && eventCommand.handleCancelSelection) {
+            await eventCommand.handleCancelSelection(interaction, eventCommand.dbManager);
+        } else {
+            console.error('Event command or handleCancelSelection method not found');
+        }
+    } else if (customId === 'signup_content_type_select') {
+        console.log('Signup content type select menu detected, routing to signup command');
+        
+        // This is a signup content type selection
+        const signupCommand = client.commands.get('signup');
+        if (signupCommand && signupCommand.handleContentTypeSelection) {
+            await signupCommand.handleContentTypeSelection(interaction, signupCommand.dbManager);
+        } else {
+            console.error('Signup command or handleContentTypeSelection method not found');
+        }
+    } else if (customId === 'signup_comp_select') {
+        console.log('Signup comp select menu detected, routing to signup command');
+        
+        // This is a signup composition selection
+        const signupCommand = client.commands.get('signup');
+        if (signupCommand && signupCommand.handleCompSelection) {
+            await signupCommand.handleCompSelection(interaction, signupCommand.dbManager);
+        } else {
+            console.error('Signup command or handleCompSelection method not found');
+        }
+    }
+};
+
+// Guild join event
+client.on(Events.GuildCreate, guild => {
+    console.log(`🎉 Bot joined guild: ${guild.name} (${guild.id})`);
+});
+
+// Guild leave event
+client.on(Events.GuildDelete, guild => {
+    console.log(`👋 Bot left guild: ${guild.name} (${guild.id})`);
+});
+
+// Error handling
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', error => {
+    console.error('Uncaught exception:', error);
+    process.exit(1);
 });
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-    console.log('🛑 Shutting down gracefully...');
-    if (selfPingInterval) {
-        clearInterval(selfPingInterval);
-    }
-    server.close(() => {
-        console.log('✅ Server closed');
-        process.exit(0);
-    });
+process.on('SIGINT', async () => {
+    console.log('\n🛑 Shutting down bot...');
+    await dbManager.disconnect();
+    client.destroy();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    console.log('\n🛑 Shutting down bot...');
+    await dbManager.disconnect();
+    client.destroy();
+    process.exit(0);
+});
+
+// Create HTTP server for ping services
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is alive! 🟢');
+});
+
+// Start HTTP server on port 8080 (Render will use this)
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+    console.log(`🌐 HTTP server running on port ${PORT}`);
 });
 
 // Login to Discord
-console.log('🔑 Attempting to login with token:', config.botToken ? config.botToken.substring(0, 10) + '...' : 'undefined');
-client.login(config.botToken);
+client.login(config.bot.token);

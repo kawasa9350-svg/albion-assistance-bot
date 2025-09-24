@@ -327,10 +327,19 @@ module.exports = {
 
             const row = new ActionRowBuilder().addComponents(editSelect);
 
+            // Get the updated edit data to check for comp context
+            const updatedEditData = interaction.client.editBuildData?.get(interaction.user.id) || {};
+            
+            // Create description with comp context if available
+            let description = 'Select what you would like to edit:';
+            if (updatedEditData.fromComp && updatedEditData.compContentType) {
+                description = `**Editing from comp with content type: ${updatedEditData.compContentType}**\n\nSelect what you would like to edit:`;
+            }
+
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle(`🔧 Editing: ${build.name}`)
-                .setDescription('Select what you would like to edit:')
+                .setDescription(description)
                 .addFields(
                     { name: 'Content Type', value: build.contentType || 'Not specified', inline: true },
                     { name: 'Weapon', value: build.weapon || 'Not specified', inline: true },
@@ -345,6 +354,15 @@ module.exports = {
                 )
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
+
+            // Add comp context field if available
+            if (updatedEditData.fromComp && updatedEditData.compContentType) {
+                embed.addFields({ 
+                    name: '🎭 Comp Context', 
+                    value: `This build is being edited from a comp with content type: **${updatedEditData.compContentType}**`, 
+                    inline: false 
+                });
+            }
 
             await interaction.update({ embeds: [embed], components: [row] });
         } catch (error) {
@@ -567,10 +585,15 @@ module.exports = {
             const row = new ActionRowBuilder().addComponents(editSelect);
 
             // Show updated build info with success message in description
+            let description = `✅ **${this.getFieldDisplayName(editType)}** updated to: **${newValue}**\n\nSelect what you would like to edit next:`;
+            if (editData.fromComp && editData.compContentType) {
+                description = `✅ **${this.getFieldDisplayName(editType)}** updated to: **${newValue}**\n\n**Comp Context:** ${editData.compContentType}\n\nSelect what you would like to edit next:`;
+            }
+
             const updatedEmbed = new EmbedBuilder()
                 .setColor('#00FF00')
                 .setTitle(`🔧 Editing: ${editData.build.name}`)
-                .setDescription(`✅ **${this.getFieldDisplayName(editType)}** updated to: **${newValue}**\n\nSelect what you would like to edit next:`)
+                .setDescription(description)
                 .addFields(
                     { name: 'Content Type', value: editData.build.contentType || 'Not specified', inline: true },
                     { name: 'Weapon', value: editData.build.weapon || 'Not specified', inline: true },
@@ -585,6 +608,15 @@ module.exports = {
                 )
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
+
+            // Add comp context field if available
+            if (editData.fromComp && editData.compContentType) {
+                updatedEmbed.addFields({ 
+                    name: '🎭 Comp Context', 
+                    value: `This build is being edited from a comp with content type: **${editData.compContentType}**`, 
+                    inline: false 
+                });
+            }
 
             await interaction.reply({ 
                 embeds: [updatedEmbed], 
@@ -672,15 +704,30 @@ module.exports = {
 
             const row = new ActionRowBuilder().addComponents(contentTypeSelect);
 
+            // Create description with comp context if available
+            let description = 'Select the new content type for this build:';
+            if (editData.fromComp && editData.compContentType) {
+                description = `**Editing from comp with content type: ${editData.compContentType}**\n\nSelect the new content type for this build:`;
+            }
+
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle(`🔧 Editing: ${editData.build.name}`)
-                .setDescription('Select the new content type for this build:')
+                .setDescription(description)
                 .addFields(
                     { name: 'Current Content Type', value: editData.build.contentType || 'General', inline: true }
                 )
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
+
+            // Add comp context field if available
+            if (editData.fromComp && editData.compContentType) {
+                embed.addFields({ 
+                    name: '🎭 Comp Context', 
+                    value: `This build is being edited from a comp with content type: **${editData.compContentType}**`, 
+                    inline: false 
+                });
+            }
 
             await interaction.update({ embeds: [embed], components: [row] });
         } catch (error) {
@@ -749,10 +796,15 @@ module.exports = {
             const row = new ActionRowBuilder().addComponents(editSelect);
 
             // Show updated build info with success message in description
+            let description = `✅ **Content Type** updated to: **${newContentType}**\n\nSelect what you would like to edit next:`;
+            if (editData.fromComp && editData.compContentType) {
+                description = `✅ **Content Type** updated to: **${newContentType}**\n\n**Comp Context:** ${editData.compContentType}\n\nSelect what you would like to edit next:`;
+            }
+
             const updatedEmbed = new EmbedBuilder()
                 .setColor('#00FF00')
                 .setTitle(`🔧 Editing: ${editData.build.name}`)
-                .setDescription(`✅ **Content Type** updated to: **${newContentType}**\n\nSelect what you would like to edit next:`)
+                .setDescription(description)
                 .addFields(
                     { name: 'Content Type', value: editData.build.contentType || 'Not specified', inline: true },
                     { name: 'Weapon', value: editData.build.weapon || 'Not specified', inline: true },
@@ -767,6 +819,15 @@ module.exports = {
                 )
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
+
+            // Add comp context field if available
+            if (editData.fromComp && editData.compContentType) {
+                updatedEmbed.addFields({ 
+                    name: '🎭 Comp Context', 
+                    value: `This build is being edited from a comp with content type: **${editData.compContentType}**`, 
+                    inline: false 
+                });
+            }
 
             await interaction.update({ 
                 embeds: [updatedEmbed], 
