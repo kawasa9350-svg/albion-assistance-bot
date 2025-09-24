@@ -17,13 +17,13 @@ module.exports = {
                 .addStringOption(option =>
                     option
                         .setName('date')
-                        .setDescription('Date for the event (e.g., "tomorrow", "8/25", "Jan 15")')
+                        .setDescription('Date (MM-DD), e.g., 09-24')
                         .setRequired(true)
                 )
                 .addStringOption(option =>
                     option
                         .setName('time')
-                        .setDescription('Time for the event (e.g., "8 PM", "20:00", "04 UTC")')
+                        .setDescription('Time in UTC (HH:mm), e.g., 20:00')
                         .setRequired(true)
                 )
         )
@@ -72,260 +72,39 @@ module.exports = {
         }
     },
 
-    // Utility function to parse date/time input and convert to timestamp
-    parseDateTime(input) {
+    // Utility: strictly parse date (MM-DD) and time (HH:mm as UTC), return UTC timestamp
+    parseDateTime(dateStr, timeStr) {
         try {
-            let date = new Date();
             const now = new Date();
-            
-            // Convert input to lowercase for easier parsing
-            const inputLower = input.toLowerCase().trim();
-            
-            // Handle relative time formats
-            if (inputLower.includes('tomorrow')) {
-                date.setDate(date.getDate() + 1);
-                date.setHours(0, 0, 0, 0); // Start of day
-                
-                // Extract time from input (e.g., "tomorrow at 8 pm", "tomorrow 8pm")
-                const timeMatch = inputLower.match(/(\d{1,2})\s*(am|pm)/i);
-                if (timeMatch) {
-                    let hour = parseInt(timeMatch[1]);
-                    const ampm = timeMatch[2].toLowerCase();
-                    
-                    if (ampm === 'pm' && hour !== 12) hour += 12;
-                    if (ampm === 'am' && hour === 12) hour = 0;
-                    
-                    date.setHours(hour, 0, 0, 0);
-                }
-            } else if (inputLower.includes('today')) {
-                date.setHours(0, 0, 0, 0); // Start of day
-                
-                // Extract time from input (e.g., "today at 8 pm", "today 8pm", "today 4")
-                const timeMatch = inputLower.match(/(\d{1,2})\s*(am|pm)?/i);
-                if (timeMatch) {
-                    let hour = parseInt(timeMatch[1]);
-                    const ampm = timeMatch[2] ? timeMatch[2].toLowerCase() : null;
-                    
-                    if (ampm === 'pm' && hour !== 12) hour += 12;
-                    if (ampm === 'am' && hour === 12) hour = 0;
-                    // If no AM/PM specified, assume 24-hour format or treat as-is
-                    
-                    date.setHours(hour, 0, 0, 0);
-                }
-            } else if (inputLower.includes('next week')) {
-                date.setDate(date.getDate() + 7);
-                date.setHours(0, 0, 0, 0); // Start of day
-                
-                // Extract time from input
-                const timeMatch = inputLower.match(/(\d{1,2})\s*(am|pm)/i);
-                if (timeMatch) {
-                    let hour = parseInt(timeMatch[1]);
-                    const ampm = timeMatch[2].toLowerCase();
-                    
-                    if (ampm === 'pm' && hour !== 12) hour += 12;
-                    if (ampm === 'am' && hour === 12) hour = 0;
-                    
-                    date.setHours(hour, 0, 0, 0);
-                }
-            } else if (inputLower.includes('next month')) {
-                date.setMonth(date.getMonth() + 1);
-                date.setHours(0, 0, 0, 0); // Start of day
-                
-                // Extract time from input
-                const timeMatch = inputLower.match(/(\d{1,2})\s*(am|pm)/i);
-                if (timeMatch) {
-                    let hour = parseInt(timeMatch[1]);
-                    const ampm = timeMatch[2].toLowerCase();
-                    
-                    if (ampm === 'pm' && hour !== 12) hour += 12;
-                    if (ampm === 'am' && hour === 12) hour = 0;
-                    
-                    date.setHours(hour, 0, 0, 0);
-                }
-            } else if (inputLower.includes('in') || /^\d+\s*(minute|hour|day|week)/.test(inputLower)) {
-                // Handle "in X hours/days/weeks" format or just "X minutes/hours/days/weeks"
-                const hourMatch = inputLower.match(/(?:in\s+)?(\d+)\s*hour/);
-                const dayMatch = inputLower.match(/(?:in\s+)?(\d+)\s*day/);
-                const weekMatch = inputLower.match(/(?:in\s+)?(\d+)\s*week/);
-                const minuteMatch = inputLower.match(/(?:in\s+)?(\d+)\s*minute/);
-                
-                if (hourMatch) {
-                    date.setHours(date.getHours() + parseInt(hourMatch[1]));
-                } else if (dayMatch) {
-                    date.setDate(date.getDate() + parseInt(dayMatch[1]));
-                } else if (weekMatch) {
-                    date.setDate(date.getDate() + (parseInt(weekMatch[1]) * 7));
-                } else if (minuteMatch) {
-                    date.setMinutes(date.getMinutes() + parseInt(minuteMatch[1]));
-                }
-            } else if (inputLower.includes('this evening') || inputLower.includes('tonight')) {
-                // Set to 8 PM today
-                date.setHours(20, 0, 0, 0);
-            } else if (inputLower.includes('this afternoon')) {
-                // Set to 2 PM today
-                date.setHours(14, 0, 0, 0);
-            } else if (inputLower.includes('this morning')) {
-                // Set to 9 AM today
-                date.setHours(9, 0, 0, 0);
-            } else {
-                // Try to parse common formats
-                const formats = [
-                    // "8 PM", "8pm"
-                    /^(\d{1,2})\s*(am|pm)$/i,
-                    // "20:00"
-                    /^(\d{1,2}):(\d{2})$/,
-                    // "8/25 23:59"
-                    /^(\d{1,2})\s*\/\s*(\d{1,2})\s+(\d{1,2}):(\d{2})$/,
-                    // "8/25 04 UTC"
-                    /^(\d{1,2})\/(\d{1,2})\s+(\d{1,2})\s*utc$/i,
-                    // "04 UTC", "4 UTC"
-                    /^(\d{1,2})\s*utc$/i,
-                    // "4 PM UTC", "4:15 UTC", "16:30 UTC"
-                    /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*utc$/i,
-                    // "Jan 15 8 PM"
-                    /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{1,2})(?:st|nd|rd|th)?\s+(\d{1,2})\s*(am|pm)/i,
-                    // "15 Jan 8 PM"
-                    /^(\d{1,2})(?:st|nd|rd|th)?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+(\d{1,2})\s*(am|pm)/i
-                ];
-                
-                let matched = false;
-                for (const format of formats) {
-                    const match = input.match(format);
-                    if (match) {
-                        if (format.source.includes('am|pm')) {
-                            // Handle time-only or date+time formats
-                            if (match.length === 3) {
-                                // Time only: "8 PM"
-                                let hour = parseInt(match[1]);
-                                const ampm = match[2].toLowerCase();
-                                
-                                if (ampm === 'pm' && hour !== 12) hour += 12;
-                                if (ampm === 'am' && hour === 12) hour = 0;
-                                
-                                date.setHours(hour, 0, 0, 0);
-                            } else if (match.length === 5) {
-                                // Date + time: "Jan 15 8 PM"
-                                const month = match[1];
-                                const day = parseInt(match[2]);
-                                let hour = parseInt(match[3]);
-                                const ampm = match[4].toLowerCase();
-                                
-                                const monthIndex = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 
-                                                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(month);
-                                
-                                if (monthIndex !== -1) {
-                                    date.setMonth(monthIndex);
-                                    date.setDate(day);
-                                    
-                                    if (ampm === 'pm' && hour !== 12) hour += 12;
-                                    if (ampm === 'am' && hour === 12) hour = 0;
-                                    
-                                    date.setHours(hour, 0, 0, 0);
-                                }
-                            }
-                        } else if (format.source.includes(':')) {
-                            // Handle "20:00" format or "8/25 23:59" format
-                            if (format.source.includes('\\/')) {
-                                // "8/25 23:59" format - match[1] = month, match[2] = day, match[3] = hour, match[4] = minute
-                                const month = parseInt(match[1]) - 1; // Month is 0-indexed
-                                const day = parseInt(match[2]);
-                                const hour = parseInt(match[3]);
-                                const minute = parseInt(match[4]);
-                                
-                                // Create a new date object to prevent corruption
-                                const currentYear = new Date().getFullYear();
-                                date = new Date(currentYear, month, day, hour, minute, 0, 0);
-                            } else {
-                                // "20:00" format (time only)
-                                const hour = parseInt(match[1]);
-                                const minute = parseInt(match[2]);
-                                date.setHours(hour, minute, 0, 0);
-                            }
-                        } else if (format.source.includes('utc')) {
-                            // Handle UTC time formats: "04 UTC", "4 PM UTC", "4:15 UTC", "16:30 UTC"
-                            let hour = parseInt(match[1]);
-                            let minute = 0;
-                            
-                            // Check if this is the MM/DD HH UTC format
-                            if (format.source.includes('\\/')) {
-                                // "8/25 04 UTC" format - match[1] = month, match[2] = day, match[3] = hour
-                                const month = parseInt(match[1]) - 1; // Month is 0-indexed
-                                const day = parseInt(match[2]);
-                                hour = parseInt(match[3]);
-                                
-                                // Create a new date object with current year
-                                const currentYear = new Date().getFullYear();
-                                let targetYear = currentYear;
-                                
-                                // Check if this date has already passed this year
-                                const testDate = new Date(currentYear, month, day);
-                                const now = new Date();
-                                if (testDate < now) {
-                                    targetYear = currentYear + 1; // Move to next year
-                                }
-                                
-                                date = new Date(targetYear, month, day, 0, 0, 0, 0);
-                                
-                                // Set the time as UTC
-                                date.setUTCHours(hour, minute, 0, 0);
-                            } else {
-                                // Regular UTC time format: "04 UTC", "4 PM UTC", "4:15 UTC"
-                                // Check if minutes are provided (e.g., "4:15 UTC")
-                                if (match[2] && match[2] !== undefined) {
-                                    minute = parseInt(match[2]);
-                                }
-                                
-                                // Check if AM/PM is provided (e.g., "4 PM UTC")
-                                if (match[3] && match[3] !== undefined) {
-                                    const ampm = match[3].toLowerCase();
-                                    if (ampm === 'pm' && hour !== 12) hour += 12;
-                                    if (ampm === 'am' && hour === 12) hour = 0;
-                                }
-                                
-                                // Set the time directly as UTC (no timezone conversion needed)
-                                date.setUTCHours(hour, minute, 0, 0);
-                            }
-                        }
-                        matched = true;
-                        break;
-                    }
-                }
-                
-                if (!matched) {
-                    // Fallback: try to parse the input directly
-                    let parsedDate = new Date(input);
-                    
-                    // If it's a valid date, use it
-                    if (!isNaN(parsedDate.getTime())) {
-                        date = parsedDate;
-                    } else {
-                        throw new Error('Could not parse date format');
-                    }
-                }
-            }
-            
-            // ALL time inputs are treated as UTC time directly
-            let utcTimestamp;
-            
-            // Extract the parsed time components and create UTC timestamp
-            const year = date.getFullYear();
-            const month = date.getMonth();
-            const day = date.getDate();
-            const hour = date.getHours();
-            const minute = date.getMinutes();
-            
-            // Create UTC timestamp directly - ALL times are treated as UTC
-            utcTimestamp = Date.UTC(year, month, day, hour, minute, 0, 0);
-            
-            // Ensure the UTC time is in the future
+
+            // Validate date MM-DD
+            const dateMatch = /^([0-1]?\d)-([0-3]?\d)$/.test(dateStr) ? dateStr.match(/^([0-1]?\d)-([0-3]?\d)$/) : null;
+            if (!dateMatch) throw new Error('Invalid date format. Use MM-DD');
+            const mm = parseInt(dateMatch[1], 10);
+            const dd = parseInt(dateMatch[2], 10);
+            if (mm < 1 || mm > 12) throw new Error('Invalid month in date');
+            if (dd < 1 || dd > 31) throw new Error('Invalid day in date');
+
+            // Validate time HH:mm (UTC)
+            const timeMatch = /^([01]?\d|2[0-3]):([0-5]\d)$/.test(timeStr) ? timeStr.match(/^([01]?\d|2[0-3]):([0-5]\d)$/) : null;
+            if (!timeMatch) throw new Error('Invalid time format. Use HH:mm in UTC');
+            const HH = parseInt(timeMatch[1], 10);
+            const MI = parseInt(timeMatch[2], 10);
+
+            // Build UTC timestamp for current year
+            const currentYear = now.getUTCFullYear();
+            let targetYear = currentYear;
+            let utcTimestamp = Date.UTC(targetYear, mm - 1, dd, HH, MI, 0, 0);
+
+            // If it already passed this year, schedule for next year
             if (utcTimestamp <= now.getTime()) {
-                // If the UTC time is in the past, add 24 hours to move to next day
-                utcTimestamp += 24 * 60 * 60 * 1000;
+                targetYear = currentYear + 1;
+                utcTimestamp = Date.UTC(targetYear, mm - 1, dd, HH, MI, 0, 0);
             }
-            
+
             return {
                 timestamp: utcTimestamp,
-                formatted: `August ${new Date(utcTimestamp).getUTCDate()}, ${new Date(utcTimestamp).getUTCFullYear()} at ${new Date(utcTimestamp).getUTCHours().toString().padStart(2, '0')}:${new Date(utcTimestamp).getUTCMinutes().toString().padStart(2, '0')} UTC`,
+                formatted: `<t:${Math.floor(utcTimestamp / 1000)}:F>`,
                 relative: this.getRelativeTime(new Date(utcTimestamp)),
                 utcInfo: `UTC: ${this.formatUTCTime(utcTimestamp)}`
             };
@@ -512,15 +291,15 @@ module.exports = {
         const eventTime = interaction.options.getString('time');
         
         // Combine date and time for parsing
-        const dateTimeInput = `${eventDate} ${eventTime}`.trim();
+        const dateTimeInput = `${eventDate} ${eventTime} UTC`.trim();
         
         // Parse the date and time
-        const parsedDateTime = this.parseDateTime(dateTimeInput);
+        const parsedDateTime = this.parseDateTime(eventDate, eventTime);
         if (!parsedDateTime) {
             const embed = new EmbedBuilder()
                 .setColor('#FF0000')
                 .setTitle('❌ Invalid Date/Time Format')
-                .setDescription(`Could not parse the date/time: "${dateTimeInput}"\n\n**Supported Formats:**\n• **Relative:** "tomorrow at 8 PM", "in 2 hours", "next week 3pm"\n• **Natural:** "this evening", "tonight", "Jan 15 8 PM"\n• **24hr:** "20:00", "14:30"\n• **Date + Time:** "8/25 23:59", "12/31 16:00"\n• **UTC Explicit:** "8/25 04 UTC", "12/31 16 UTC"\n• **Standard:** "2024-01-15 20:00"`)
+                .setDescription(`Could not parse the date/time: "${eventDate} ${eventTime}"\n\n**Required format:**\n• **Date:** MM-DD (e.g., 09-24)\n• **Time:** HH:mm in UTC (e.g., 20:00)\n\nThe bot will convert this UTC time to viewers' local time automatically in the Discord timestamp.`)
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
             
