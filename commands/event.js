@@ -41,17 +41,40 @@ function daysInMonth(year, monthNumber) {
 
 function buildDaySelect(year, monthNumber) {
 	const totalDays = daysInMonth(year, monthNumber);
-	const options = [];
-	for (let day = 1; day <= totalDays; day++) {
-		options.push({ label: `${day}`, value: `${day}` });
+	// Discord select menus can have max 25 options. Split if needed.
+	if (totalDays <= 25) {
+		const options = [];
+		for (let day = 1; day <= totalDays; day++) options.push({ label: `${day}`, value: `${day}` });
+		return [
+			new ActionRowBuilder().addComponents(
+				new StringSelectMenuBuilder()
+					.setCustomId('event_create_day')
+					.setPlaceholder('Select day')
+					.addOptions(options)
+			)
+		];
 	}
 
-	return new ActionRowBuilder().addComponents(
-		new StringSelectMenuBuilder()
-			.setCustomId('event_create_day')
-			.setPlaceholder('Select day')
-			.addOptions(options)
-	);
+	const firstOptions = [];
+	for (let day = 1; day <= 25; day++) firstOptions.push({ label: `${day}`, value: `${day}` });
+	const secondOptions = [];
+	for (let day = 26; day <= totalDays; day++) secondOptions.push({ label: `${day}`, value: `${day}` });
+
+	const rows = [
+		new ActionRowBuilder().addComponents(
+			new StringSelectMenuBuilder()
+				.setCustomId('event_create_day_a')
+				.setPlaceholder('Select day (1-25)')
+				.addOptions(firstOptions)
+		),
+		new ActionRowBuilder().addComponents(
+			new StringSelectMenuBuilder()
+				.setCustomId('event_create_day_b')
+				.setPlaceholder(`Select day (26-${totalDays})`)
+				.addOptions(secondOptions)
+		)
+	];
+	return rows;
 }
 
 function buildTimeModal() {
@@ -239,10 +262,10 @@ module.exports = {
 					.setDescription(`Event: **${state.name}**\nStep 2: Select day`)
 					.setTimestamp();
 
-				return interaction.update({ embeds: [embed], components: [buildDaySelect(year, month)] });
+				return interaction.update({ embeds: [embed], components: buildDaySelect(year, month) });
 			}
 
-			if (customId === 'event_create_day') {
+			if (customId === 'event_create_day' || customId === 'event_create_day_a' || customId === 'event_create_day_b') {
 				const day = parseInt(interaction.values[0], 10);
 				state.day = day;
 				createWizardState.set(interaction.user.id, state);
