@@ -355,8 +355,8 @@ module.exports = {
                     break;
                 case 'event_continue':
                     console.log('Continuing with optional steps...');
-                    // Hide the action buttons and show only content type selection
-                    await this.showContentTypeSelectionOnly(interaction, db, eventData);
+                    // Jump directly to comp selection showing ALL comps
+                    await this.showCompSelection(interaction, db, eventData, true);
                     break;
 
                 case 'event_cancel':
@@ -389,7 +389,7 @@ module.exports = {
 
     async showContentTypeSelection(interaction, db, eventData) {
         try {
-            // Create action buttons row with Create Event and Continue options
+            // Create action buttons row with Create Event and Choose Comp options
             const actionButtons = new ActionRowBuilder()
                 .addComponents(
                     new ButtonBuilder()
@@ -398,7 +398,7 @@ module.exports = {
                         .setStyle(ButtonStyle.Success),
                     new ButtonBuilder()
                         .setCustomId('event_continue')
-                        .setLabel('➡️ Choose Content Type')
+                        .setLabel('➡️ Choose Comp')
                         .setStyle(ButtonStyle.Primary)
                 );
 
@@ -406,7 +406,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#FF6B6B')
                 .setTitle('📅 Event Creation')
-                .setDescription(`**Step 1:** Choose an optional content type for your event, or create the event now.\n\n**Event Name:** ${eventData.name}\n**Date & Time:** ${eventData.formattedDateTime || eventData.dateTime}\n**⏰ Time until event:** ${eventData.relativeTime || 'Unknown'}`)
+                .setDescription(`**Step 1:** Choose an optional Comp for your event, or create the event now.\n\n**Event Name:** ${eventData.name}\n**Date & Time:** ${eventData.formattedDateTime || eventData.dateTime}\n**⏰ Time until event:** ${eventData.relativeTime || 'Unknown'}`)
                 .setFooter({ text: 'Phoenix Assistance Bot • Step 1 of 2' })
                 .setTimestamp();
 
@@ -501,8 +501,8 @@ module.exports = {
             eventData.contentType = selectedContentType === 'none' ? '' : selectedContentType;
             interaction.client.eventData.set(userId, eventData);
 
-            // Skip the comp sheet button and go directly to comp sheet selection
-            await this.showCompSelection(interaction, db, eventData);
+            // Go directly to comp selection (respect selected content type if any)
+            await this.showCompSelection(interaction, db, eventData, selectedContentType === 'none');
         } catch (error) {
             console.error('Error handling content type selection:', error);
             await interaction.reply({
@@ -512,11 +512,13 @@ module.exports = {
         }
     },
 
-    async showCompSelection(interaction, db, eventData) {
+    async showCompSelection(interaction, db, eventData, forceAll = false) {
         try {
             // Get available compositions
             let comps;
-            if (eventData.contentType && eventData.contentType !== '' && eventData.contentType !== 'none') {
+            if (forceAll) {
+                comps = await db.getComps(interaction.guildId, 'all');
+            } else if (eventData.contentType && eventData.contentType !== '' && eventData.contentType !== 'none') {
                 comps = await db.getComps(interaction.guildId, eventData.contentType);
             } else {
                 comps = await db.getComps(interaction.guildId, null);
@@ -562,7 +564,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#FF6B6B')
                 .setTitle('📅 Event Creation')
-                .setDescription(`**Step 2:** Choose an optional Comp Sheet for your event, or create the event now.\n\n**Event Name:** ${eventData.name}\n**Date & Time:** ${eventData.formattedDateTime || eventData.dateTime}\n**⏰ Time until event:** ${eventData.relativeTime || 'Unknown'}\n**Content Type:** ${eventData.contentType || 'None'}`)
+                .setDescription(`**Step 2:** Choose an optional Comp Sheet for your event, or create the event now.\n\n**Event Name:** ${eventData.name}\n**Date & Time:** ${eventData.formattedDateTime || eventData.dateTime}\n**⏰ Time until event:** ${eventData.relativeTime || 'Unknown'}${forceAll ? '' : `\n**Content Type:** ${eventData.contentType || 'None'}`}`)
                 .setFooter({ text: 'Phoenix Assistance Bot • Step 2 of 2' })
                 .setTimestamp();
 
