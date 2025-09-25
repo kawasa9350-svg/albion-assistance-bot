@@ -26,6 +26,12 @@ module.exports = {
                         .setDescription('Time in UTC (HH:mm), e.g., 20:00')
                         .setRequired(true)
                 )
+                .addStringOption(option =>
+                    option
+                        .setName('roles')
+                        .setDescription('Roles to ping when creating the event (mention roles like @role1 @role2)')
+                        .setRequired(false)
+                )
         )
         .addSubcommand(subcommand =>
             subcommand
@@ -289,6 +295,7 @@ module.exports = {
         const eventName = interaction.options.getString('name');
         const eventDate = interaction.options.getString('date');
         const eventTime = interaction.options.getString('time');
+        const rolesToPing = interaction.options.getString('roles') || '';
         
         // Combine date and time for parsing
         const dateTimeInput = `${eventDate} ${eventTime} UTC`.trim();
@@ -315,6 +322,7 @@ module.exports = {
             relativeTime: parsedDateTime.relative,
             contentType: '',
             compName: '',
+            rolesToPing: rolesToPing,
             createdBy: interaction.user.id,
             createdAt: new Date()
         };
@@ -712,7 +720,16 @@ module.exports = {
                         { name: '⏰ **Time until event**', value: this.getRelativeTimestamp(eventData.timestamp), inline: false },
                         { name: '🎯 **Content Type**', value: eventData.contentType || 'General', inline: true },
                         { name: '👤 **Organizer**', value: `<@${eventData.createdBy}>`, inline: true }
-                    )
+                    );
+                
+                // Add roles field if roles were specified
+                if (eventData.rolesToPing && eventData.rolesToPing.trim() !== '') {
+                    publicEventEmbed.addFields(
+                        { name: '🔔 **Roles Pinged**', value: eventData.rolesToPing, inline: false }
+                    );
+                }
+                
+                publicEventEmbed
                     .setFooter({ text: 'Phoenix Assistance Bot • Event Created' })
                     .setTimestamp();
 
@@ -783,7 +800,9 @@ module.exports = {
                 }
 
                 // Send the public event announcement with buttons (ensure <= 5 component rows)
+                const messageContent = eventData.rolesToPing ? `${eventData.rolesToPing}` : '';
                 await interaction.channel.send({ 
+                    content: messageContent,
                     embeds: [publicEventEmbed], 
                     components: buttonRows 
                 });
@@ -880,11 +899,18 @@ module.exports = {
                     `🎭 **Comp Sheet:** ${event.compName || 'None'}`,
                     `👤 **Created by:** <@${event.createdBy}>`,
                     `📅 **Created:** ${new Date(event.createdAt).toLocaleDateString()}`
-                ].join('\n');
+                ];
+                
+                // Add roles information if available
+                if (event.rolesToPing && event.rolesToPing.trim() !== '') {
+                    eventInfo.push(`🔔 **Roles Pinged:** ${event.rolesToPing}`);
+                }
+                
+                const eventInfoString = eventInfo.join('\n');
 
                 embed.addFields({
                     name: `📅 ${event.name}`,
-                    value: eventInfo,
+                    value: eventInfoString,
                     inline: false
                 });
             });
@@ -991,6 +1017,11 @@ module.exports = {
                 if (selectedEvent.createdAt) {
                     const createdDate = new Date(selectedEvent.createdAt).toLocaleDateString();
                     detailedEmbed.addFields({ name: '📅 Created', value: createdDate, inline: true });
+                }
+                
+                // Add roles information if available
+                if (selectedEvent.rolesToPing && selectedEvent.rolesToPing.trim() !== '') {
+                    detailedEmbed.addFields({ name: '🔔 Roles Pinged', value: selectedEvent.rolesToPing, inline: false });
                 }
 
                 // Create confirm and cancel buttons
