@@ -539,8 +539,15 @@ module.exports = {
             const updatedBuild = { ...editData.build };
             updatedBuild[this.getFieldName(editType)] = newValue;
 
+            // Track composition updates for user feedback
+            let updatedComps = 0;
+
             // If editing name, we need to handle it specially
             if (editType === 'edit_name') {
+                // Update composition references before changing the build name
+                updatedComps = await db.updateCompositionBuildReferences(interaction.guildId, editData.originalName, newValue);
+                console.log(`Updated ${updatedComps} compositions with new build name: ${editData.originalName} -> ${newValue}`);
+                
                 // Delete old build and add new one
                 await db.deleteBuild(interaction.guildId, editData.originalName);
                 await db.addBuild(interaction.guildId, updatedBuild);
@@ -588,6 +595,11 @@ module.exports = {
             let description = `✅ **${this.getFieldDisplayName(editType)}** updated to: **${newValue}**\n\nSelect what you would like to edit next:`;
             if (editData.fromComp && editData.compContentType) {
                 description = `✅ **${this.getFieldDisplayName(editType)}** updated to: **${newValue}**\n\n**Comp Context:** ${editData.compContentType}\n\nSelect what you would like to edit next:`;
+            }
+            
+            // Add information about composition updates if name was changed
+            if (editType === 'edit_name' && updatedComps > 0) {
+                description += `\n\n🎭 **Updated ${updatedComps} composition(s)** that referenced this build.`;
             }
 
             const updatedEmbed = new EmbedBuilder()

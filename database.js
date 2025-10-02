@@ -867,6 +867,46 @@ class DatabaseManager {
         }
     }
 
+    async updateCompositionBuildReferences(guildId, oldBuildName, newBuildName) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            console.log(`🔧 Updating composition build references: ${oldBuildName} -> ${newBuildName} in guild ${guildId}`);
+            
+            // Find all compositions that reference the old build name
+            const compositions = await collection.find({
+                guildId: guildId,
+                type: 'composition',
+                builds: oldBuildName
+            }).toArray();
+            
+            console.log(`Found ${compositions.length} compositions referencing build "${oldBuildName}"`);
+            
+            let updatedCount = 0;
+            for (const comp of compositions) {
+                // Update the builds array by replacing old name with new name
+                const updatedBuilds = comp.builds.map(buildName => 
+                    buildName === oldBuildName ? newBuildName : buildName
+                );
+                
+                const result = await collection.updateOne(
+                    { _id: comp._id },
+                    { $set: { builds: updatedBuilds } }
+                );
+                
+                if (result.modifiedCount > 0) {
+                    updatedCount++;
+                    console.log(`✅ Updated composition "${comp.name}" - replaced "${oldBuildName}" with "${newBuildName}"`);
+                }
+            }
+            
+            console.log(`Updated ${updatedCount} compositions with new build name`);
+            return updatedCount;
+        } catch (error) {
+            console.error('❌ Failed to update composition build references:', error);
+            return 0;
+        }
+    }
+
     async isGuildRegistered(guildId) {
         try {
             const collection = await this.getGuildCollection(guildId);
