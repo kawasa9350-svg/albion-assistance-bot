@@ -309,11 +309,8 @@ module.exports = {
                 }
             }).join('\n');
 
-            publicEmbed.addFields({
-                name: '🎭 **Available Builds**',
-                value: publicBuildList,
-                inline: false
-            });
+            // Add build list fields, splitting into multiple fields if needed
+            this.addBuildListFields(publicEmbed, publicBuildList);
             
             // Add note if builds were truncated due to Discord's component limit
             if (buildsTruncated) {
@@ -617,11 +614,8 @@ module.exports = {
                 }
             }).join('\n');
 
-            embed.addFields({
-                name: '🎭 **Available Builds**',
-                value: buildList,
-                inline: false
-            });
+            // Add build list fields, splitting into multiple fields if needed
+            this.addBuildListFields(embed, buildList);
 
             // Create updated build signup buttons
             const buttonRows = this.createBuildSignupButtons(composition.builds, compName, interaction.client.eventSignups, currentUserId, sessionId);
@@ -668,5 +662,49 @@ module.exports = {
     // Generate a unique session ID for each signup session
     generateSessionId() {
         return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    },
+
+    // Helper function to add build list fields to an embed, splitting into multiple fields if needed
+    addBuildListFields(embed, buildList, fieldName = '🎭 **Available Builds**') {
+        const maxFieldLength = 1024;
+        if (buildList.length <= maxFieldLength) {
+            // Single field if under limit
+            embed.addFields({
+                name: fieldName,
+                value: buildList,
+                inline: false
+            });
+        } else {
+            // Split into multiple fields
+            const buildLines = buildList.split('\n');
+            let currentField = '';
+            let fieldIndex = 1;
+            
+            for (const line of buildLines) {
+                // Check if adding this line would exceed the limit
+                if (currentField.length + line.length + 1 > maxFieldLength) {
+                    // Add current field and start a new one
+                    embed.addFields({
+                        name: fieldIndex === 1 ? fieldName : `${fieldName} (cont.)`,
+                        value: currentField.trim(),
+                        inline: false
+                    });
+                    currentField = line;
+                    fieldIndex++;
+                } else {
+                    // Add line to current field
+                    currentField += (currentField ? '\n' : '') + line;
+                }
+            }
+            
+            // Add the last field if it has content
+            if (currentField.trim()) {
+                embed.addFields({
+                    name: fieldIndex === 1 ? fieldName : `${fieldName} (cont.)`,
+                    value: currentField.trim(),
+                    inline: false
+                });
+            }
+        }
     }
 };
