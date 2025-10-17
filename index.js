@@ -11,7 +11,8 @@ const config = require('./config.js');
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates
     ]
 });
 
@@ -51,6 +52,9 @@ client.once(Events.ClientReady, async () => {
         
         // Load all event signups for all guilds to ensure we have current state after bot reset
         await loadAllEventSignupsForAllGuilds();
+        
+        // Load all voice channel setups for all guilds
+        await loadAllVoiceChannelSetups();
     } else {
         console.log('❌ Failed to connect to database');
     }
@@ -100,6 +104,39 @@ async function loadAllEventSignupsForAllGuilds() {
         console.log(`✅ Total signup entries loaded across all guilds: ${client.eventSignups.size}`);
     } catch (error) {
         console.error('Error loading all event signups for all guilds:', error);
+    }
+}
+
+// Helper function to load all voice channel setups for all guilds
+async function loadAllVoiceChannelSetups() {
+    try {
+        console.log('🔄 Loading all voice channel setups for all guilds...');
+        
+        // Initialize voice channel setups storage if it doesn't exist
+        if (!client.voiceChannelSetups) {
+            client.voiceChannelSetups = new Map();
+        }
+        
+        // Get all guilds the bot is in
+        const guilds = client.guilds.cache;
+        console.log(`Found ${guilds.size} guilds`);
+        
+        // Load voice channel setups for each guild
+        for (const [guildId, guild] of guilds) {
+            try {
+                const setup = await dbManager.getVoiceChannelSetup(guildId);
+                if (setup) {
+                    client.voiceChannelSetups.set(guildId, setup);
+                    console.log(`Loaded voice channel setup for guild: ${guild.name}`);
+                }
+            } catch (error) {
+                console.error(`Error loading voice channel setup for guild ${guild.name}:`, error);
+            }
+        }
+        
+        console.log(`✅ Total voice channel setups loaded: ${client.voiceChannelSetups.size}`);
+    } catch (error) {
+        console.error('Error loading all voice channel setups for all guilds:', error);
     }
 }
 
@@ -345,6 +382,19 @@ client.on(Events.MessageDelete, async (message) => {
         }
     } catch (error) {
         console.error('Error handling message delete for cleanup:', error);
+    }
+});
+
+// Voice state update event - handle join-to-create voice channels
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+    try {
+        // Get the voice channel command to handle the voice state update
+        const voiceChannelCommand = client.commands.get('voice-channel');
+        if (voiceChannelCommand && voiceChannelCommand.handleVoiceStateUpdate) {
+            await voiceChannelCommand.handleVoiceStateUpdate(oldState, newState, client);
+        }
+    } catch (error) {
+        console.error('Error handling voice state update:', error);
     }
 });
 

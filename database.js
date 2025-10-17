@@ -1106,6 +1106,56 @@ class DatabaseManager {
             return { success: false, error: error.message };
         }
     }
+
+    // Voice channel setup methods
+    async setVoiceChannelSetup(guildId, setupData) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            console.log(`🎤 Setting voice channel setup for guild ${guildId}`);
+            
+            const result = await collection.updateOne(
+                { guildId: guildId },
+                { $set: { voiceChannelSetup: setupData } },
+                { upsert: true }
+            );
+            
+            console.log('Set voice channel setup result:', result);
+            return result.acknowledged;
+        } catch (error) {
+            console.error('❌ Failed to set voice channel setup:', error);
+            return false;
+        }
+    }
+
+    async getVoiceChannelSetup(guildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            return guild ? guild.voiceChannelSetup : null;
+        } catch (error) {
+            console.error('❌ Failed to get voice channel setup:', error);
+            return null;
+        }
+    }
+
+    async removeVoiceChannelSetup(guildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            console.log(`🗑️ Removing voice channel setup for guild ${guildId}`);
+            
+            const result = await collection.updateOne(
+                { guildId: guildId },
+                { $unset: { voiceChannelSetup: "" } }
+            );
+            
+            console.log('Remove voice channel setup result:', result);
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('❌ Failed to remove voice channel setup:', error);
+            return false;
+        }
+    }
 }
 
 module.exports = DatabaseManager;
