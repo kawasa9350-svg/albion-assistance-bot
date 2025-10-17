@@ -298,8 +298,8 @@ module.exports = {
             const guild = voiceState.guild;
             const user = voiceState.member.user;
             
-            // Create a temporary voice channel
-            const channelName = `${user.username}'s Channel`;
+            // Create a temporary voice channel with user mention
+            const channelName = `${user}'s Channel`;
             
             const tempChannel = await guild.channels.create({
                 name: channelName,
