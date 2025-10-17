@@ -298,26 +298,38 @@ module.exports = {
             const guild = voiceState.guild;
             const user = voiceState.member.user;
             
+            // Get the join-to-create channel to copy its permissions
+            const joinToCreateChannel = guild.channels.cache.get(setup.channelId);
+            if (!joinToCreateChannel) {
+                console.error('Join-to-create channel not found');
+                return;
+            }
+            
             // Create a temporary voice channel with user's display name or username
             const displayName = voiceState.member.displayName || user.username;
             const channelName = `${displayName}'s Channel`;
+            
+            // Copy permissions from the join-to-create channel
+            const permissionOverwrites = joinToCreateChannel.permissionOverwrites.cache.map(overwrite => ({
+                id: overwrite.id,
+                allow: overwrite.allow.bitfield,
+                deny: overwrite.deny.bitfield,
+                type: overwrite.type
+            }));
+            
+            // Add specific permissions for the channel creator
+            permissionOverwrites.push({
+                id: user.id,
+                allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels],
+                type: 1 // Member type
+            });
             
             const tempChannel = await guild.channels.create({
                 name: channelName,
                 type: ChannelType.GuildVoice,
                 parent: setup.categoryId,
                 userLimit: setup.userLimit,
-                permissionOverwrites: [
-                    {
-                        id: user.id,
-                        allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ManageChannels]
-                    },
-                    {
-                        id: guild.roles.everyone.id,
-                        allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel],
-                        deny: [PermissionFlagsBits.ManageChannels]
-                    }
-                ]
+                permissionOverwrites: permissionOverwrites
             });
 
             // Move the user to the new channel
