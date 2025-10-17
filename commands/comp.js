@@ -272,15 +272,19 @@ module.exports = {
                 default:
                     // Check if this is a build detail button
                     if (interaction.customId.startsWith('comp_build_detail_')) {
-                        // Extract build name from custom ID format: comp_build_detail_${index}_${buildName}
-                        const customIdParts = interaction.customId.split('_');
-                        if (customIdParts.length >= 4) {
-                            // Skip 'comp', 'build', 'detail', and index, then join the rest as build name
-                            const buildName = customIdParts.slice(4).join('_');
-                            console.log(`Opening build detail for: ${buildName}`);
-                            await this.handleBuildDetail(interaction, db, buildName);
+                        // Extract build ID from custom ID format: comp_build_detail_${buildId}
+                        const buildId = interaction.customId.replace('comp_build_detail_', '');
+                        console.log(`Opening build detail for build ID: ${buildId}`);
+                        
+                        // Get the build by ID
+                        const build = await db.getBuildById(interaction.guildId, buildId);
+                        if (build) {
+                            await this.handleBuildDetail(interaction, db, build.name, build.compId);
                         } else {
-                            console.log(`Invalid build detail custom ID format: ${interaction.customId}`);
+                            await interaction.reply({
+                                content: '❌ Build not found.',
+                                ephemeral: true
+                            });
                         }
                     } else if (interaction.customId.startsWith('comp_build_edit_')) {
                         // Handle build edit button from comp list
@@ -513,10 +517,10 @@ module.exports = {
         }
     },
 
-    async handleBuildDetail(interaction, db, buildName) {
+    async handleBuildDetail(interaction, db, buildName, compId = null) {
         try {
             // Get the build details from the database with exact name matching
-            const builds = await db.getBuilds(interaction.guildId, null, buildName);
+            const builds = await db.getBuilds(interaction.guildId, null, buildName, compId);
             
             // Filter for exact name match to prevent partial matching (e.g., "test" matching "testt")
             const exactMatch = builds.find(build => build.name === buildName);
@@ -542,10 +546,10 @@ module.exports = {
                     createdAt: new Date()
                 };
                 
-                // Add the new build to the database
-                const success = await db.addBuild(interaction.guildId, newBuild);
+                // Add the new build to the database (comp-specific if compId provided)
+                const buildId = await db.addBuild(interaction.guildId, newBuild, compId);
                 
-                if (success) {
+                if (buildId) {
                     console.log(`Successfully created new build: ${buildName}`);
                     
                     // Create embed showing the new clean build
@@ -1219,6 +1223,10 @@ module.exports = {
                                 detailedEmbed.addFields({ name: '📅 Created', value: createdDate, inline: true });
                             }
                             
+                            // Get the actual build details for this comp
+                            const compBuilds = await db.getCompBuilds(interaction.guildId, selectedComp.compId);
+                            console.log(`Found ${compBuilds.length} builds for comp ${selectedComp.name} (ID: ${selectedComp.compId})`);
+                            
                             // Check if build details are viewable (lockView field)
                             const isViewable = selectedComp.lockView !== false; // Default to true if not set
                             console.log(`Comp "${selectedComp.name}" lockView: ${selectedComp.lockView}, isViewable: ${isViewable}`);
@@ -1226,23 +1234,23 @@ module.exports = {
                             let buildButtons = [];
                             
                             if (isViewable) {
-                                // Create build detail buttons for each build
+                                // Create build detail buttons for each build using build IDs
                                 const buildsPerRow = 4; // Show 4 builds per row
                                 const maxRows = 5; // Discord limit
                                 const maxBuilds = maxRows * buildsPerRow; // 20 builds maximum
                                 
                                 // If we have more builds than can fit, truncate and add a note
-                                const buildsToShow = selectedComp.builds.slice(0, maxBuilds);
+                                const buildsToShow = compBuilds.slice(0, maxBuilds);
                                 
                                 for (let i = 0; i < buildsToShow.length; i += buildsPerRow) {
                                     const row = new ActionRowBuilder();
                                     const rowBuilds = buildsToShow.slice(i, i + buildsPerRow);
                                     
-                                    rowBuilds.forEach((buildName, rowIndex) => {
+                                    rowBuilds.forEach((build, rowIndex) => {
                                         const globalIndex = i + rowIndex; // Global index across all rows
                                         const button = new ButtonBuilder()
-                                            .setCustomId(`comp_build_detail_${globalIndex}_${buildName}`)
-                                            .setLabel(`${globalIndex + 1}. ${buildName}`)
+                                            .setCustomId(`comp_build_detail_${build.buildId}`)
+                                            .setLabel(`${globalIndex + 1}. ${build.name}`)
                                             .setStyle(ButtonStyle.Secondary)
                                             .setEmoji('⚔️');
                                         row.addComponents(button);

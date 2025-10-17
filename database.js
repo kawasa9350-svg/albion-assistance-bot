@@ -456,12 +456,42 @@ class DatabaseManager {
             const collection = await this.getGuildCollection(guildId);
             console.log(`🎭 Adding composition: ${compData.name} to guild ${guildId}`);
             
+            // Generate unique comp ID
+            const compId = this.generateCompId();
+            
+            // Convert build names to build IDs and create comp-specific builds
+            const buildIds = [];
+            for (const buildName of compData.builds) {
+                // Create a comp-specific build
+                const buildData = {
+                    name: buildName,
+                    weapon: 'Not specified',
+                    offhand: 'Not specified',
+                    cape: 'Not specified',
+                    head: 'Not specified',
+                    chest: 'Not specified',
+                    shoes: 'Not specified',
+                    food: 'Not specified',
+                    potion: 'Not specified',
+                    contentType: compData.contentType || 'General',
+                    createdBy: compData.createdBy,
+                    createdAt: new Date()
+                };
+                
+                const buildId = await this.addBuild(guildId, buildData, compId);
+                if (buildId) {
+                    buildIds.push(buildId);
+                }
+            }
+            
             const comp = {
                 guildId: guildId,
+                compId: compId,
                 type: 'composition', // Add type field to distinguish from events
                 name: compData.name,
                 contentType: compData.contentType,
-                builds: compData.builds,
+                buildIds: buildIds, // Store build IDs instead of build names
+                builds: compData.builds, // Keep original names for display
                 createdBy: compData.createdBy,
                 createdAt: compData.createdAt,
                 lockView: compData.lockView !== undefined ? compData.lockView : true // Default to true (viewable)
@@ -474,6 +504,13 @@ class DatabaseManager {
             console.error('❌ Failed to add composition:', error);
             return false;
         }
+    }
+
+    generateCompId() {
+        // Generate a unique comp ID using timestamp and random string
+        const timestamp = Date.now().toString(36);
+        const random = Math.random().toString(36).substring(2, 8);
+        return `comp_${timestamp}_${random}`;
     }
 
     async getComps(guildId, contentType = null) {
@@ -796,18 +833,39 @@ class DatabaseManager {
         }
     }
 
-    async addBuild(guildId, buildData) {
+    async addBuild(guildId, buildData, compId = null) {
         try {
             const collection = await this.getGuildCollection(guildId);
+            
+            // Generate unique build ID
+            const buildId = this.generateBuildId();
+            
+            // Add build ID and comp ID to build data
+            const buildWithId = {
+                ...buildData,
+                buildId: buildId,
+                compId: compId, // null for global builds, compId for comp-specific builds
+                createdAt: buildData.createdAt || new Date()
+            };
+            
             await collection.updateOne(
                 { guildId: guildId },
-                { $push: { builds: buildData } }
+                { $push: { builds: buildWithId } }
             );
-            return true;
+            
+            console.log(`Added build with ID ${buildId}${compId ? ` for comp ${compId}` : ' (global)'}`);
+            return buildId; // Return the build ID instead of just true
         } catch (error) {
             console.error('❌ Failed to add build:', error);
             return false;
         }
+    }
+
+    generateBuildId() {
+        // Generate a unique build ID using timestamp and random string
+        const timestamp = Date.now().toString(36);
+        const random = Math.random().toString(36).substring(2, 8);
+        return `build_${timestamp}_${random}`;
     }
 
     async deleteBuild(guildId, buildName) {
@@ -824,7 +882,7 @@ class DatabaseManager {
         }
     }
 
-    async getBuilds(guildId, contentType = null, buildName = null) {
+    async getBuilds(guildId, contentType = null, buildName = null, compId = null) {
         try {
             const collection = await this.getGuildCollection(guildId);
             const guild = await collection.findOne({ guildId: guildId });
@@ -837,7 +895,17 @@ class DatabaseManager {
             }
             
             let builds = guild.builds;
-            console.log(`Database getBuilds: Starting with ${builds.length} builds, contentType filter: ${contentType}, buildName filter: ${buildName}`);
+            console.log(`Database getBuilds: Starting with ${builds.length} builds, contentType filter: ${contentType}, buildName filter: ${buildName}, compId filter: ${compId}`);
+            
+            // Filter by comp ID if specified
+            if (compId !== null) {
+                builds = builds.filter(build => build.compId === compId);
+                console.log(`Database getBuilds: After compId filter: ${builds.length} builds`);
+            } else {
+                // If no compId specified, only return global builds (compId is null)
+                builds = builds.filter(build => build.compId === null);
+                console.log(`Database getBuilds: After global filter: ${builds.length} builds`);
+            }
             
             if (contentType) {
                 builds = builds.filter(build => build.contentType === contentType);
@@ -855,6 +923,56 @@ class DatabaseManager {
             return builds;
         } catch (error) {
             console.error('❌ Failed to get builds:', error);
+            return [];
+        }
+    }
+
+    async getBuildsByCompId(guildId, compId) {
+        try {
+            return await this.getBuilds(guildId, null, null, compId);
+        } catch (error) {
+            console.error('❌ Failed to get builds by comp ID:', error);
+            return [];
+        }
+    }
+
+    async getBuildById(guildId, buildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.builds) {
+                return null;
+            }
+            
+            return guild.builds.find(build => build.buildId === buildId) || null;
+        } catch (error) {
+            console.error('❌ Failed to get build by ID:', error);
+            return null;
+        }
+    }
+
+    async getCompBuilds(guildId, compId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const comp = await collection.findOne({ compId: compId });
+            
+            if (!comp || !comp.buildIds) {
+                return [];
+            }
+            
+            // Get all builds for this composition
+            const builds = [];
+            for (const buildId of comp.buildIds) {
+                const build = await this.getBuildById(guildId, buildId);
+                if (build) {
+                    builds.push(build);
+                }
+            }
+            
+            return builds;
+        } catch (error) {
+            console.error('❌ Failed to get comp builds:', error);
             return [];
         }
     }
