@@ -448,6 +448,7 @@ client.on(Events.InteractionCreate, async interaction => {
 // Handle button interactions
 client.handleButtonInteraction = async (interaction) => {
     console.log(`Button clicked: ${interaction.customId} by user ${interaction.user.id}`);
+    console.log(`Interaction type: ${interaction.type}, isButton: ${interaction.isButton()}`);
     
     // Find the command that created this button by checking custom IDs
     const customId = interaction.customId;

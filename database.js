@@ -829,20 +829,29 @@ class DatabaseManager {
             const collection = await this.getGuildCollection(guildId);
             const guild = await collection.findOne({ guildId: guildId });
             
-            if (!guild || !guild.builds) return [];
+            console.log(`Database getBuilds: Guild found: ${!!guild}, Has builds array: ${!!(guild && guild.builds)}, Builds count: ${guild && guild.builds ? guild.builds.length : 0}`);
+            
+            if (!guild || !guild.builds) {
+                console.log('Database getBuilds: No guild or builds array found, returning empty array');
+                return [];
+            }
             
             let builds = guild.builds;
+            console.log(`Database getBuilds: Starting with ${builds.length} builds, contentType filter: ${contentType}, buildName filter: ${buildName}`);
             
             if (contentType) {
                 builds = builds.filter(build => build.contentType === contentType);
+                console.log(`Database getBuilds: After contentType filter: ${builds.length} builds`);
             }
             
             if (buildName) {
                 builds = builds.filter(build => 
                     build.name.toLowerCase().includes(buildName.toLowerCase())
                 );
+                console.log(`Database getBuilds: After buildName filter: ${builds.length} builds`);
             }
             
+            console.log(`Database getBuilds: Returning ${builds.length} builds`);
             return builds;
         } catch (error) {
             console.error('❌ Failed to get builds:', error);
