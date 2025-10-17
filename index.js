@@ -548,6 +548,16 @@ client.handleButtonInteraction = async (interaction) => {
         } else {
             console.error('Leaderboard command or handleButtonInteraction method not found');
         }
+    } else if (customId === 'build_edit_prev_page' || customId === 'build_edit_next_page') {
+        console.log('Build edit pagination button detected, routing to build-edit command');
+        
+        // This is a build edit pagination button
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handlePaginationButton) {
+            await buildEditCommand.handlePaginationButton(interaction);
+        } else {
+            console.error('Build-edit command or handlePaginationButton method not found');
+        }
     }
 };
 

@@ -194,26 +194,50 @@ module.exports = {
                 return interaction.update({ embeds: [embed], components: [] });
             }
 
-            // Store the selected content type for later use
+            // Store the selected content type and pagination data for later use
             if (!interaction.client.editBuildData) {
                 interaction.client.editBuildData = new Map();
             }
-            interaction.client.editBuildData.set(interaction.user.id, { selectedContentType });
+            interaction.client.editBuildData.set(interaction.user.id, { 
+                selectedContentType,
+                allBuilds: builds,
+                currentPage: 0,
+                buildsPerPage: 25
+            });
 
-            // Create build selection menu with pagination support
-            const maxOptions = 25; // Discord's limit
-            const totalBuilds = builds.length;
-            const currentPage = 0; // Start with page 0
-            const buildsPerPage = maxOptions;
-            const startIndex = currentPage * buildsPerPage;
+            // Show the first page of builds
+            await this.showBuildsPage(interaction, 0);
+        } catch (error) {
+            console.error('Error in handleContentTypeSelection:', error);
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('An error occurred while loading builds.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            await interaction.update({ embeds: [embed], components: [] });
+        }
+    },
+
+    async showBuildsPage(interaction, page) {
+        try {
+            const editData = interaction.client.editBuildData?.get(interaction.user.id);
+            if (!editData) {
+                throw new Error('Edit data not found');
+            }
+
+            const { allBuilds, buildsPerPage, selectedContentType } = editData;
+            const totalBuilds = allBuilds.length;
+            const totalPages = Math.ceil(totalBuilds / buildsPerPage);
+            const startIndex = page * buildsPerPage;
             const endIndex = Math.min(startIndex + buildsPerPage, totalBuilds);
-            const currentBuilds = builds.slice(startIndex, endIndex);
-            
-            console.log(`Build-edit: Showing builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
-            
+            const currentBuilds = allBuilds.slice(startIndex, endIndex);
+
+            console.log(`Build-edit: Showing page ${page + 1}/${totalPages}, builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
+
             // Create build options with unique values to handle duplicate names
             const buildOptions = [];
-            const usedValues = new Set();
             
             currentBuilds.forEach((build, index) => {
                 const weapon = build.weapon || 'No weapon';
@@ -300,25 +324,49 @@ module.exports = {
                 .setPlaceholder(`Select a build to edit (${startIndex + 1}-${endIndex} of ${totalBuilds})`)
                 .addOptions(buildOptions);
 
-            const row = new ActionRowBuilder().addComponents(buildSelect);
+            // Create pagination buttons
+            const paginationButtons = [];
+            
+            if (page > 0) {
+                paginationButtons.push(
+                    new ButtonBuilder()
+                        .setCustomId('build_edit_prev_page')
+                        .setLabel('◀️ Previous')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+            
+            if (page < totalPages - 1) {
+                paginationButtons.push(
+                    new ButtonBuilder()
+                        .setCustomId('build_edit_next_page')
+                        .setLabel('Next ▶️')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+
+            const components = [new ActionRowBuilder().addComponents(buildSelect)];
+            
+            if (paginationButtons.length > 0) {
+                components.push(new ActionRowBuilder().addComponents(paginationButtons));
+            }
 
             let description = `Content Type: **${selectedContentType === 'all' ? 'All Content Types' : selectedContentType === 'general' ? 'General' : selectedContentType}**\n\nShowing builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds.\n\nSelect a build from the menu below to edit its details.`;
-            
-            // Add pagination note if there are more builds
-            if (totalBuilds > buildsPerPage) {
-                description += `\n\n⚠️ **Note:** Only the first ${buildsPerPage} builds are shown due to Discord's limits. Use specific content types to filter builds.`;
-            }
             
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle('🔧 Edit Build')
                 .setDescription(description)
-                .setFooter({ text: `Phoenix Assistance Bot • Page 1 of ${Math.ceil(totalBuilds / buildsPerPage)}` })
+                .setFooter({ text: `Phoenix Assistance Bot • Page ${page + 1} of ${totalPages}` })
                 .setTimestamp();
 
-            await interaction.update({ embeds: [embed], components: [row] });
+            // Update the stored page
+            editData.currentPage = page;
+            interaction.client.editBuildData.set(interaction.user.id, editData);
+
+            await interaction.update({ embeds: [embed], components: components });
         } catch (error) {
-            console.error('Error in handleContentTypeSelection:', error);
+            console.error('Error in showBuildsPage:', error);
             const embed = new EmbedBuilder()
                 .setColor('#FF0000')
                 .setTitle('❌ Error')
@@ -381,7 +429,7 @@ module.exports = {
             interaction.client.editBuildData.set(interaction.user.id, { 
                 ...existingData, 
                 build, 
-                originalName: buildName 
+                originalName: build.name 
             });
 
             // Create edit options menu
@@ -940,7 +988,37 @@ module.exports = {
             
             await interaction.update({ embeds: [embed], components: [] });
         }
+    },
+
+    async handlePaginationButton(interaction) {
+        try {
+            const customId = interaction.customId;
+            const editData = interaction.client.editBuildData?.get(interaction.user.id);
+            
+            if (!editData) {
+                await interaction.reply({
+                    content: '❌ Build selection data not found. Please try again.',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            let newPage = editData.currentPage;
+            
+            if (customId === 'build_edit_prev_page') {
+                newPage = Math.max(0, editData.currentPage - 1);
+            } else if (customId === 'build_edit_next_page') {
+                const totalPages = Math.ceil(editData.allBuilds.length / editData.buildsPerPage);
+                newPage = Math.min(totalPages - 1, editData.currentPage + 1);
+            }
+
+            await this.showBuildsPage(interaction, newPage);
+        } catch (error) {
+            console.error('Error handling pagination button:', error);
+            await interaction.reply({
+                content: '❌ An error occurred while changing pages. Please try again.',
+                ephemeral: true
+            });
+        }
     }
-
-
 };
