@@ -1133,6 +1133,23 @@ class DatabaseManager {
         }
     }
 
+    async updateBuildFieldById(guildId, buildId, fieldName, newValue) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            
+            const result = await collection.updateOne(
+                { guildId: guildId, 'builds.buildId': buildId },
+                { $set: { [`builds.$.${fieldName}`]: newValue } }
+            );
+            
+            console.log(`✅ Updated build field: ${fieldName} for build ID: ${buildId} in guild: ${guildId}`);
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('❌ Failed to update build field by ID:', error);
+            return false;
+        }
+    }
+
     async updateCompositionBuildReferences(guildId, oldBuildName, newBuildName) {
         try {
             const collection = await this.getGuildCollection(guildId);

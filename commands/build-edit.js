@@ -714,9 +714,9 @@ module.exports = {
                 await db.deleteBuild(interaction.guildId, editData.originalName);
                 await db.addBuild(interaction.guildId, updatedBuild);
             } else {
-                // Update existing build
+                // Update existing build by ID
                 const fieldName = this.getFieldName(editType);
-                await db.updateBuildField(interaction.guildId, editData.originalName, fieldName, newValue);
+                await db.updateBuildFieldById(interaction.guildId, editData.build.buildId, fieldName, newValue);
             }
 
             // Update the stored build data with the new value
@@ -935,7 +935,7 @@ module.exports = {
 
             // Update the build's content type
             const fieldName = this.getFieldName('edit_content_type');
-            await db.updateBuildField(interaction.guildId, editData.originalName, fieldName, newContentType);
+            await db.updateBuildFieldById(interaction.guildId, editData.build.buildId, fieldName, newContentType);
 
             // Update the stored build data
             editData.build.contentType = newContentType;
