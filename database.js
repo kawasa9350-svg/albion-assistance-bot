@@ -902,8 +902,8 @@ class DatabaseManager {
                 builds = builds.filter(build => build.compId === compId);
                 console.log(`Database getBuilds: After compId filter: ${builds.length} builds`);
             } else {
-                // If no compId specified, only return global builds (compId is null)
-                builds = builds.filter(build => build.compId === null);
+                // If no compId specified, return global builds (compId is null or undefined for legacy builds)
+                builds = builds.filter(build => build.compId === null || build.compId === undefined);
                 console.log(`Database getBuilds: After global filter: ${builds.length} builds`);
             }
             
@@ -957,8 +957,14 @@ class DatabaseManager {
             const collection = await this.getGuildCollection(guildId);
             const comp = await collection.findOne({ compId: compId });
             
-            if (!comp || !comp.buildIds) {
+            if (!comp) {
                 return [];
+            }
+            
+            // Check if this is a legacy comp (no buildIds field)
+            if (!comp.buildIds) {
+                console.log(`Legacy comp detected: ${comp.name}, migrating...`);
+                return await this.migrateLegacyComp(guildId, comp);
             }
             
             // Get all builds for this composition
@@ -974,6 +980,139 @@ class DatabaseManager {
         } catch (error) {
             console.error('❌ Failed to get comp builds:', error);
             return [];
+        }
+    }
+
+    async migrateLegacyComp(guildId, comp) {
+        try {
+            console.log(`Migrating legacy comp: ${comp.name}`);
+            
+            // Generate comp ID if it doesn't exist
+            if (!comp.compId) {
+                comp.compId = this.generateCompId();
+            }
+            
+            // Create build IDs for each build name
+            const buildIds = [];
+            const builds = [];
+            
+            for (const buildName of comp.builds) {
+                // Check if build already exists globally
+                const existingBuilds = await this.getBuilds(guildId, null, buildName, null);
+                let build = existingBuilds.find(b => b.name === buildName);
+                
+                if (!build) {
+                    // Create a new comp-specific build
+                    const buildData = {
+                        name: buildName,
+                        weapon: 'Not specified',
+                        offhand: 'Not specified',
+                        cape: 'Not specified',
+                        head: 'Not specified',
+                        chest: 'Not specified',
+                        shoes: 'Not specified',
+                        food: 'Not specified',
+                        potion: 'Not specified',
+                        contentType: comp.contentType || 'General',
+                        createdBy: comp.createdBy,
+                        createdAt: comp.createdAt || new Date()
+                    };
+                    
+                    const buildId = await this.addBuild(guildId, buildData, comp.compId);
+                    if (buildId) {
+                        buildIds.push(buildId);
+                        build = await this.getBuildById(guildId, buildId);
+                    }
+                } else {
+                    // Use existing build but make it comp-specific
+                    const buildId = this.generateBuildId();
+                    const compSpecificBuild = {
+                        ...build,
+                        buildId: buildId,
+                        compId: comp.compId
+                    };
+                    
+                    // Add the comp-specific version
+                    await this.addBuild(guildId, compSpecificBuild, comp.compId);
+                    buildIds.push(buildId);
+                    build = compSpecificBuild;
+                }
+                
+                if (build) {
+                    builds.push(build);
+                }
+            }
+            
+            // Update the comp with build IDs
+            const collection = await this.getGuildCollection(guildId);
+            await collection.updateOne(
+                { _id: comp._id },
+                { 
+                    $set: { 
+                        compId: comp.compId,
+                        buildIds: buildIds
+                    } 
+                }
+            );
+            
+            console.log(`Successfully migrated comp: ${comp.name} with ${buildIds.length} builds`);
+            return builds;
+        } catch (error) {
+            console.error('❌ Failed to migrate legacy comp:', error);
+            return [];
+        }
+    }
+
+    async migrateAllLegacyData(guildId) {
+        try {
+            console.log(`Starting migration for guild ${guildId}...`);
+            
+            const collection = await this.getGuildCollection(guildId);
+            
+            // Find all legacy comps (no compId field)
+            const legacyComps = await collection.find({ 
+                type: 'composition', 
+                compId: { $exists: false } 
+            }).toArray();
+            
+            console.log(`Found ${legacyComps.length} legacy comps to migrate`);
+            
+            for (const comp of legacyComps) {
+                await this.migrateLegacyComp(guildId, comp);
+            }
+            
+            // Migrate legacy builds (no buildId field)
+            const legacyBuilds = await collection.find({ 
+                guildId: guildId,
+                builds: { $exists: true }
+            }).toArray();
+            
+            if (legacyBuilds.length > 0) {
+                const guild = legacyBuilds[0];
+                if (guild.builds) {
+                    const buildsToMigrate = guild.builds.filter(build => !build.buildId);
+                    console.log(`Found ${buildsToMigrate.length} legacy builds to migrate`);
+                    
+                    for (const build of buildsToMigrate) {
+                        if (!build.buildId) {
+                            build.buildId = this.generateBuildId();
+                            build.compId = null; // Global build
+                        }
+                    }
+                    
+                    // Update the guild document
+                    await collection.updateOne(
+                        { guildId: guildId },
+                        { $set: { builds: guild.builds } }
+                    );
+                }
+            }
+            
+            console.log(`Migration completed for guild ${guildId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Failed to migrate legacy data:', error);
+            return false;
         }
     }
 

@@ -141,8 +141,37 @@ module.exports = {
         }
     },
 
+    async ensureMigration(guildId, db, client) {
+        try {
+            // Check if migration has already been run for this guild
+            const migrationKey = `migration_${guildId}`;
+            if (client.migrationStatus?.get(migrationKey)) {
+                return; // Migration already completed
+            }
+
+            console.log(`Checking if migration is needed for guild ${guildId}...`);
+            
+            // Run migration
+            const success = await db.migrateAllLegacyData(guildId);
+            
+            if (success) {
+                // Mark migration as completed
+                if (!client.migrationStatus) {
+                    client.migrationStatus = new Map();
+                }
+                client.migrationStatus.set(migrationKey, true);
+                console.log(`Migration completed for guild ${guildId}`);
+            }
+        } catch (error) {
+            console.error('Error during migration check:', error);
+        }
+    },
+
     async handleContentTypeSelection(interaction, db) {
         try {
+            // Run migration for this guild if needed
+            await this.ensureMigration(interaction.guildId, db, interaction.client);
+            
             const selectedContentType = interaction.values[0];
             
             console.log(`Build-edit: Selected content type: ${selectedContentType}`);
