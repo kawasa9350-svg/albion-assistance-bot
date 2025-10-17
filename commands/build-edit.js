@@ -211,7 +211,11 @@ module.exports = {
             
             console.log(`Build-edit: Showing builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
             
-            const buildOptions = currentBuilds.map(build => {
+            // Create build options with unique values to handle duplicate names
+            const buildOptions = [];
+            const usedValues = new Set();
+            
+            currentBuilds.forEach((build, index) => {
                 const weapon = build.weapon || 'No weapon';
                 const offhand = build.offhand || 'No offhand';
                 const cape = build.cape || 'No cape';
@@ -274,10 +278,21 @@ module.exports = {
                     description = description.substring(0, 97) + '...';
                 }
                 
-                return new StringSelectMenuOptionBuilder()
-                    .setLabel(build.name)
+                // Create unique value using build index to handle duplicate names
+                const value = `build_${startIndex + index}`;
+                
+                // Create label that shows if it's a duplicate
+                let label = build.name;
+                const nameCount = currentBuilds.filter(b => b.name === build.name).length;
+                if (nameCount > 1) {
+                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === build.name).length;
+                    label = `${build.name} (${duplicateIndex})`;
+                }
+                
+                buildOptions.push(new StringSelectMenuOptionBuilder()
+                    .setLabel(label)
                     .setDescription(description)
-                    .setValue(build.name);
+                    .setValue(value));
             });
 
             const buildSelect = new StringSelectMenuBuilder()
@@ -317,11 +332,38 @@ module.exports = {
 
     async handleBuildEditInteraction(interaction, db) {
         try {
-            const buildName = interaction.values[0];
+            const selectedValue = interaction.values[0];
             
-            // Get the specific build data
-            const builds = await db.getBuilds(interaction.guildId);
-            const build = builds.find(b => b.name === buildName);
+            // Extract build index from value (format: build_0, build_1, etc.)
+            const buildIndex = parseInt(selectedValue.replace('build_', ''));
+            
+            console.log(`Build-edit: Selected value: ${selectedValue}, Build index: ${buildIndex}`);
+            
+            // Get the edit data to find the correct build
+            const editData = interaction.client.editBuildData?.get(interaction.user.id);
+            if (!editData) {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Error')
+                    .setDescription('Build selection data not found. Please try again.')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                return interaction.update({ embeds: [embed], components: [] });
+            }
+            
+            // Get all builds and find the one at the specified index
+            let builds;
+            if (editData.selectedContentType === 'all') {
+                builds = await db.getBuilds(interaction.guildId);
+            } else if (editData.selectedContentType === 'general') {
+                builds = await db.getBuilds(interaction.guildId);
+                builds = builds.filter(build => !build.contentType || build.contentType === '' || build.contentType === 'General');
+            } else {
+                builds = await db.getBuilds(interaction.guildId, editData.selectedContentType);
+            }
+            
+            const build = builds[buildIndex];
             
             if (!build) {
                 const embed = new EmbedBuilder()
