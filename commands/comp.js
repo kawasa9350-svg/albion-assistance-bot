@@ -279,7 +279,7 @@ module.exports = {
                         // Get the build by ID
                         const build = await db.getBuildById(interaction.guildId, buildId);
                         if (build) {
-                            await this.handleBuildDetail(interaction, db, build.name, build.compId);
+                            await this.showExistingBuildDetail(interaction, build);
                         } else {
                             await interaction.reply({
                                 content: '❌ Build not found.',
@@ -687,6 +687,81 @@ module.exports = {
                 .setColor('#FF0000')
                 .setTitle('❌ Error')
                 .setDescription('An error occurred while loading build details. Please try again.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+    },
+
+    async showExistingBuildDetail(interaction, build) {
+        try {
+            console.log(`Showing existing build details for: ${build.name} (ID: ${build.buildId})`);
+            
+            // Create detailed build view embed
+            const detailedEmbed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle(`⚔️ ${build.name}`)
+                .setDescription(`**Detailed Build Information**`)
+                .addFields(
+                    { name: '⚔️ Weapon', value: build.weapon, inline: true },
+                    { name: '🛡️ Offhand', value: build.offhand || 'None', inline: true },
+                    { name: '🧣 Cape', value: build.cape, inline: true },
+                    { name: '👑 Head', value: build.head, inline: true },
+                    { name: '🥋 Chest', value: build.chest, inline: true },
+                    { name: '👟 Shoes', value: build.shoes, inline: true },
+                    { name: '🍖 Food', value: build.food, inline: true },
+                    { name: '🧪 Potion', value: build.potion, inline: true },
+                    { name: '🎯 Content Type', value: build.contentType, inline: true }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            // Add creation info if available
+            if (build.createdAt) {
+                const createdDate = new Date(build.createdAt).toLocaleDateString();
+                detailedEmbed.addFields({ name: '📅 Created', value: createdDate, inline: true });
+            }
+            
+            // Add creator info if available
+            if (build.createdBy) {
+                detailedEmbed.addFields({ name: '👤 Created By', value: `<@${build.createdBy}>`, inline: true });
+            }
+            
+            // Create components array
+            const components = [];
+            
+            // Check if user has build-edit permission
+            const hasBuildEditPermission = interaction.member.permissions.has('Administrator') || 
+                                        interaction.member.permissions.has('ManageGuild');
+            
+            // Add edit button if user has build-edit permission
+            if (hasBuildEditPermission) {
+                const editButton = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`comp_build_edit_${build.buildId}`)
+                            .setLabel('🔧 Edit Build')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('🔧')
+                    );
+                components.push(editButton);
+            }
+            
+            // Send the build details as an ephemeral message
+            await interaction.reply({ 
+                embeds: [detailedEmbed], 
+                components: components,
+                ephemeral: true 
+            });
+            console.log(`Build details displayed for: ${build.name}${hasBuildEditPermission ? ' with edit button' : ''}`);
+            
+        } catch (error) {
+            console.error('Error in showExistingBuildDetail:', error);
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('An error occurred while displaying build details.')
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
             
