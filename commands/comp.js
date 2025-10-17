@@ -288,9 +288,9 @@ module.exports = {
                         }
                     } else if (interaction.customId.startsWith('comp_build_edit_')) {
                         // Handle build edit button from comp list
-                        const buildName = interaction.customId.replace('comp_build_edit_', '');
-                        console.log(`Opening build edit for: ${buildName}`);
-                        await this.handleBuildEditFromComp(interaction, db, buildName);
+                        const buildId = interaction.customId.replace('comp_build_edit_', '');
+                        console.log(`Opening build edit for build ID: ${buildId}`);
+                        await this.handleBuildEditFromComp(interaction, db, buildId);
                     } else {
                         console.log(`Unknown interaction: ${interaction.customId}`);
                     }
@@ -665,7 +665,7 @@ module.exports = {
                 const editButton = new ActionRowBuilder()
                     .addComponents(
                         new ButtonBuilder()
-                            .setCustomId(`comp_build_edit_${buildName}`)
+                            .setCustomId(`comp_build_edit_${build.buildId}`)
                             .setLabel('🔧 Edit Build')
                             .setStyle(ButtonStyle.Primary)
                             .setEmoji('🔧')
@@ -694,11 +694,10 @@ module.exports = {
         }
     },
 
-    async handleBuildEditFromComp(interaction, db, buildName) {
+    async handleBuildEditFromComp(interaction, db, buildId) {
         try {
-            // Get the specific build data
-            const builds = await db.getBuilds(interaction.guildId);
-            const build = builds.find(b => b.name === buildName);
+            // Get the specific build data by ID
+            const build = await db.getBuildById(interaction.guildId, buildId);
             
             if (!build) {
                 const embed = new EmbedBuilder()
