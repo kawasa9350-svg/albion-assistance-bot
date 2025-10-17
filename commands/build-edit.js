@@ -200,8 +200,18 @@ module.exports = {
             }
             interaction.client.editBuildData.set(interaction.user.id, { selectedContentType });
 
-            // Create build selection menu
-            const buildOptions = builds.map(build => {
+            // Create build selection menu with pagination support
+            const maxOptions = 25; // Discord's limit
+            const totalBuilds = builds.length;
+            const currentPage = 0; // Start with page 0
+            const buildsPerPage = maxOptions;
+            const startIndex = currentPage * buildsPerPage;
+            const endIndex = Math.min(startIndex + buildsPerPage, totalBuilds);
+            const currentBuilds = builds.slice(startIndex, endIndex);
+            
+            console.log(`Build-edit: Showing builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
+            
+            const buildOptions = currentBuilds.map(build => {
                 const weapon = build.weapon || 'No weapon';
                 const offhand = build.offhand || 'No offhand';
                 const cape = build.cape || 'No cape';
@@ -272,16 +282,23 @@ module.exports = {
 
             const buildSelect = new StringSelectMenuBuilder()
                 .setCustomId('build_edit_select')
-                .setPlaceholder('Select a build to edit')
+                .setPlaceholder(`Select a build to edit (${startIndex + 1}-${endIndex} of ${totalBuilds})`)
                 .addOptions(buildOptions);
 
             const row = new ActionRowBuilder().addComponents(buildSelect);
 
+            let description = `Content Type: **${selectedContentType === 'all' ? 'All Content Types' : selectedContentType === 'general' ? 'General' : selectedContentType}**\n\nShowing builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds.\n\nSelect a build from the menu below to edit its details.`;
+            
+            // Add pagination note if there are more builds
+            if (totalBuilds > buildsPerPage) {
+                description += `\n\n⚠️ **Note:** Only the first ${buildsPerPage} builds are shown due to Discord's limits. Use specific content types to filter builds.`;
+            }
+            
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle('🔧 Edit Build')
-                .setDescription(`Content Type: **${selectedContentType === 'all' ? 'All Content Types' : selectedContentType === 'general' ? 'General' : selectedContentType}**\n\nSelect a build from the menu below to edit its details.`)
-                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setDescription(description)
+                .setFooter({ text: `Phoenix Assistance Bot • Page 1 of ${Math.ceil(totalBuilds / buildsPerPage)}` })
                 .setTimestamp();
 
             await interaction.update({ embeds: [embed], components: [row] });
