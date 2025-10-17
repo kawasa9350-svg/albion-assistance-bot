@@ -716,7 +716,7 @@ module.exports = {
             }
             interaction.client.editBuildData.set(interaction.user.id, { 
                 build, 
-                originalName: buildName,
+                originalName: build.name,
                 fromComp: true // Flag to indicate this came from comp list
             });
 
@@ -772,7 +772,7 @@ module.exports = {
                 components: [row], 
                 ephemeral: true 
             });
-            console.log(`Build edit interface opened for: ${buildName} from comp list`);
+            console.log(`Build edit interface opened for: ${build.name} from comp list`);
             
         } catch (error) {
             console.error('Error in handleBuildEditFromComp:', error);
