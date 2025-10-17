@@ -453,7 +453,18 @@ client.handleButtonInteraction = async (interaction) => {
     // Find the command that created this button by checking custom IDs
     const customId = interaction.customId;
     
-    if (customId.startsWith('build_') || customId === 'weapon' || customId === 'offhand' || 
+    // Check for build-edit pagination buttons first (before general build_ check)
+    if (customId === 'build_edit_prev_page' || customId === 'build_edit_next_page') {
+        console.log('Build edit pagination button detected, routing to build-edit command');
+        
+        // This is a build edit pagination button
+        const buildEditCommand = client.commands.get('build-edit');
+        if (buildEditCommand && buildEditCommand.handlePaginationButton) {
+            await buildEditCommand.handlePaginationButton(interaction);
+        } else {
+            console.error('Build-edit command or handlePaginationButton method not found');
+        }
+    } else if (customId.startsWith('build_') || customId === 'weapon' || customId === 'offhand' || 
         customId === 'cape' || customId === 'head' || customId === 'chest' || 
         customId === 'shoes' || customId === 'food' || customId === 'potion' || 
         customId === 'content_type' || customId === 'create_build' || customId === 'cancel_build') {
@@ -548,16 +559,6 @@ client.handleButtonInteraction = async (interaction) => {
             await leaderboardCommand.handleButtonInteraction(interaction, leaderboardCommand.dbManager);
         } else {
             console.error('Leaderboard command or handleButtonInteraction method not found');
-        }
-    } else if (customId === 'build_edit_prev_page' || customId === 'build_edit_next_page') {
-        console.log('Build edit pagination button detected, routing to build-edit command');
-        
-        // This is a build edit pagination button
-        const buildEditCommand = client.commands.get('build-edit');
-        if (buildEditCommand && buildEditCommand.handlePaginationButton) {
-            await buildEditCommand.handlePaginationButton(interaction);
-        } else {
-            console.error('Build-edit command or handlePaginationButton method not found');
         }
     }
 };
