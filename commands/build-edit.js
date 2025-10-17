@@ -145,23 +145,49 @@ module.exports = {
         try {
             const selectedContentType = interaction.values[0];
             
+            console.log(`Build-edit: Selected content type: ${selectedContentType}`);
+            
             // Get builds based on selected content type
             let builds;
             if (selectedContentType === 'all') {
+                // For 'all', get all builds without any filtering
                 builds = await db.getBuilds(interaction.guildId);
+                console.log(`Build-edit: Retrieved ${builds ? builds.length : 0} builds for 'all' content type`);
+                
+                // If no builds found, try to get all builds from the guild document directly as fallback
+                if (!builds || builds.length === 0) {
+                    console.log('Build-edit: No builds found via getBuilds, trying direct guild query...');
+                    const guild = await db.getGuildCollection(interaction.guildId);
+                    const guildData = await guild.findOne({ guildId: interaction.guildId });
+                    builds = guildData?.builds || [];
+                    console.log(`Build-edit: Direct guild query found ${builds.length} builds`);
+                }
             } else if (selectedContentType === 'general') {
                 // For general builds, get all builds and filter for those without content type or with empty content type
                 builds = await db.getBuilds(interaction.guildId);
                 builds = builds.filter(build => !build.contentType || build.contentType === '' || build.contentType === 'General');
+                console.log(`Build-edit: Filtered to ${builds ? builds.length : 0} general builds`);
             } else {
                 builds = await db.getBuilds(interaction.guildId, selectedContentType);
+                console.log(`Build-edit: Retrieved ${builds ? builds.length : 0} builds for content type: ${selectedContentType}`);
             }
             
             if (!builds || builds.length === 0) {
+                console.log(`Build-edit: No builds found for content type: ${selectedContentType}`);
+                
+                let description;
+                if (selectedContentType === 'all') {
+                    description = `No builds found in this guild.\n\n**To get started:**\n1. Use \`/build create\` to create your first build\n2. Then come back to \`/build-edit\` to edit it\n\n**Note:** Make sure your guild is registered and you have build permissions.`;
+                } else if (selectedContentType === 'general') {
+                    description = `No general builds found.\n\n**Tip:** Create some builds with \`/build create\` or check if you have builds with specific content types.`;
+                } else {
+                    description = `No builds found for content type: **${selectedContentType}**.\n\n**Tip:** Create some builds with this content type using \`/build create\` command.`;
+                }
+                
                 const embed = new EmbedBuilder()
                     .setColor('#FFAA00')
                     .setTitle('⚠️ No Builds Found')
-                    .setDescription(`No builds found for ${selectedContentType === 'all' ? 'all content types' : selectedContentType === 'general' ? 'general builds' : selectedContentType}.`)
+                    .setDescription(description)
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
                 
