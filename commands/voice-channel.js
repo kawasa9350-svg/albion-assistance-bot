@@ -298,8 +298,9 @@ module.exports = {
             const guild = voiceState.guild;
             const user = voiceState.member.user;
             
-            // Create a temporary voice channel with user mention
-            const channelName = `${user}'s Channel`;
+            // Create a temporary voice channel with user's display name or username
+            const displayName = voiceState.member.displayName || user.username;
+            const channelName = `${displayName}'s Channel`;
             
             const tempChannel = await guild.channels.create({
                 name: channelName,
@@ -336,14 +337,30 @@ module.exports = {
 
             // Check if channel is empty
             if (channel.members.size === 0) {
-                // Check if this is a temporary channel (not the join-to-create channel)
                 const guildId = voiceState.guild.id;
                 const setup = voiceState.client.voiceChannelSetups?.get(guildId);
                 
-                if (setup && channel.id !== setup.channelId) {
-                    // This is a temporary channel, delete it
-                    await channel.delete();
-                    console.log(`Deleted empty temporary voice channel: ${channel.name}`);
+                // Only delete if:
+                // 1. There's a voice channel setup for this guild
+                // 2. This is not the join-to-create channel itself
+                // 3. The channel name ends with "'s Channel" (indicating it was created by our bot)
+                if (setup && 
+                    channel.id !== setup.channelId && 
+                    channel.name.endsWith("'s Channel")) {
+                    
+                    // Additional safety check: verify the channel was created recently (within last hour)
+                    const channelAge = Date.now() - channel.createdTimestamp;
+                    const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
+                    
+                    if (channelAge < oneHour) {
+                        // This is a temporary channel created by our bot, delete it
+                        await channel.delete();
+                        console.log(`Deleted empty temporary voice channel: ${channel.name}`);
+                    } else {
+                        console.log(`Skipped deletion of old channel: ${channel.name} (created ${Math.round(channelAge / 60000)} minutes ago)`);
+                    }
+                } else {
+                    console.log(`Skipped deletion of channel: ${channel.name} (not created by join-to-create system)`);
                 }
             }
 
