@@ -1330,6 +1330,15 @@ module.exports = {
                             const compBuilds = await db.getCompBuilds(interaction.guildId, selectedComp.compId);
                             console.log(`Found ${compBuilds.length} builds for comp ${selectedComp.name} (ID: ${selectedComp.compId})`);
                             
+                            // Debug: Check if this is the Clap comp
+                            if (selectedComp.name === 'Clap') {
+                                console.log(`DEBUG - Clap comp details:`);
+                                console.log(`- compId: ${selectedComp.compId}`);
+                                console.log(`- buildIds: ${selectedComp.buildIds ? selectedComp.buildIds.length : 'none'}`);
+                                console.log(`- buildIds array: ${JSON.stringify(selectedComp.buildIds)}`);
+                                console.log(`- compBuilds length: ${compBuilds.length}`);
+                            }
+                            
                             // Check if build details are viewable (lockView field)
                             const isViewable = selectedComp.lockView !== false; // Default to true if not set
                             console.log(`Comp "${selectedComp.name}" lockView: ${selectedComp.lockView}, isViewable: ${isViewable}`);

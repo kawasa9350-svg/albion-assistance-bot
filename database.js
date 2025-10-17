@@ -942,10 +942,20 @@ class DatabaseManager {
             const guild = await collection.findOne({ guildId: guildId });
             
             if (!guild || !guild.builds) {
+                console.log(`No guild or builds found for guildId: ${guildId}`);
                 return null;
             }
             
-            return guild.builds.find(build => build.buildId === buildId) || null;
+            console.log(`Searching for buildId: ${buildId} in ${guild.builds.length} builds`);
+            const build = guild.builds.find(build => build.buildId === buildId);
+            
+            if (build) {
+                console.log(`Found build: ${build.name} with buildId: ${build.buildId}`);
+            } else {
+                console.log(`Build not found. Available buildIds: ${guild.builds.map(b => b.buildId).join(', ')}`);
+            }
+            
+            return build || null;
         } catch (error) {
             console.error('❌ Failed to get build by ID:', error);
             return null;
@@ -958,8 +968,11 @@ class DatabaseManager {
             const comp = await collection.findOne({ compId: compId });
             
             if (!comp) {
+                console.log(`Comp not found for compId: ${compId}`);
                 return [];
             }
+            
+            console.log(`Found comp: ${comp.name}, buildIds: ${comp.buildIds ? comp.buildIds.length : 'none'}`);
             
             // Check if this is a legacy comp (no buildIds field)
             if (!comp.buildIds) {
@@ -970,12 +983,17 @@ class DatabaseManager {
             // Get all builds for this composition
             const builds = [];
             for (const buildId of comp.buildIds) {
+                console.log(`Looking for build with ID: ${buildId}`);
                 const build = await this.getBuildById(guildId, buildId);
                 if (build) {
+                    console.log(`Found build: ${build.name} (${build.buildId})`);
                     builds.push(build);
+                } else {
+                    console.log(`Build not found for ID: ${buildId}`);
                 }
             }
             
+            console.log(`Returning ${builds.length} builds for comp ${comp.name}`);
             return builds;
         } catch (error) {
             console.error('❌ Failed to get comp builds:', error);
