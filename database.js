@@ -1087,6 +1087,17 @@ class DatabaseManager {
             
             const collection = await this.getGuildCollection(guildId);
             
+            // Check if migration has already been completed
+            const migrationStatus = await collection.findOne({ 
+                guildId: guildId, 
+                type: 'migration_status' 
+            });
+            
+            if (migrationStatus && migrationStatus.completed) {
+                console.log(`Migration already completed for guild ${guildId}`);
+                return true;
+            }
+            
             // Find all legacy comps (no compId field)
             const legacyComps = await collection.find({ 
                 type: 'composition', 
@@ -1126,6 +1137,20 @@ class DatabaseManager {
                 }
             }
             
+            // Mark migration as completed
+            await collection.updateOne(
+                { guildId: guildId, type: 'migration_status' },
+                { 
+                    $set: { 
+                        guildId: guildId,
+                        type: 'migration_status',
+                        completed: true,
+                        completedAt: new Date()
+                    } 
+                },
+                { upsert: true }
+            );
+            
             console.log(`Migration completed for guild ${guildId}`);
             return true;
         } catch (error) {
@@ -1164,6 +1189,23 @@ class DatabaseManager {
             return result.modifiedCount > 0;
         } catch (error) {
             console.error('❌ Failed to update build field by ID:', error);
+            return false;
+        }
+    }
+
+    async deleteBuildById(guildId, buildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            
+            const result = await collection.updateOne(
+                { guildId: guildId },
+                { $pull: { builds: { buildId: buildId } } }
+            );
+            
+            console.log(`✅ Deleted build with ID: ${buildId} from guild: ${guildId}`);
+            return result.modifiedCount > 0;
+        } catch (error) {
+            console.error('❌ Failed to delete build by ID:', error);
             return false;
         }
     }

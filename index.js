@@ -570,6 +570,16 @@ client.handleButtonInteraction = async (interaction) => {
         } else {
             console.error('Build command or handleListPaginationButton method not found');
         }
+    } else if (customId === 'delete_prev_page' || customId === 'delete_next_page') {
+        console.log('Build delete pagination button detected, routing to build command');
+        
+        // This is a build delete pagination button
+        const buildCommand = client.commands.get('build');
+        if (buildCommand && buildCommand.handleDeletePaginationButton) {
+            await buildCommand.handleDeletePaginationButton(interaction);
+        } else {
+            console.error('Build command or handleDeletePaginationButton method not found');
+        }
     }
 };
 

@@ -800,23 +800,12 @@ module.exports = {
 
     async ensureMigration(guildId, db, client) {
         try {
-            // Check if migration has already been run for this guild
-            const migrationKey = `migration_${guildId}`;
-            if (client.migrationStatus?.get(migrationKey)) {
-                return; // Migration already completed
-            }
-
             console.log(`Checking if migration is needed for guild ${guildId}...`);
             
-            // Run migration
+            // Run migration (it will check database for completion status)
             const success = await db.migrateAllLegacyData(guildId);
             
             if (success) {
-                // Mark migration as completed
-                if (!client.migrationStatus) {
-                    client.migrationStatus = new Map();
-                }
-                client.migrationStatus.set(migrationKey, true);
                 console.log(`Migration completed for guild ${guildId}`);
             }
         } catch (error) {
@@ -930,18 +919,18 @@ module.exports = {
                         // Create detailed build view embed
                         const detailedEmbed = new EmbedBuilder()
                             .setColor('#00FF00')
-                            .setTitle(`⚔️ ${build.name}`)
+                            .setTitle(`⚔️ ${selectedBuild.name}`)
                             .setDescription(`**Detailed Build Information**`)
                             .addFields(
-                                { name: '⚔️ Weapon', value: build.weapon, inline: true },
-                                { name: '🛡️ Offhand', value: build.offhand || 'None', inline: true },
-                                { name: '🧣 Cape', value: build.cape, inline: true },
-                                { name: '👑 Head', value: build.head, inline: true },
-                                { name: '🥋 Chest', value: build.chest, inline: true },
-                                { name: '👟 Shoes', value: build.shoes, inline: true },
-                                { name: '🍖 Food', value: build.food, inline: true },
-                                { name: '🧪 Potion', value: build.potion, inline: true },
-                                { name: '🎯 Content Type', value: build.contentType, inline: true }
+                                { name: '⚔️ Weapon', value: selectedBuild.weapon, inline: true },
+                                { name: '🛡️ Offhand', value: selectedBuild.offhand || 'None', inline: true },
+                                { name: '🧣 Cape', value: selectedBuild.cape, inline: true },
+                                { name: '👑 Head', value: selectedBuild.head, inline: true },
+                                { name: '🥋 Chest', value: selectedBuild.chest, inline: true },
+                                { name: '👟 Shoes', value: selectedBuild.shoes, inline: true },
+                                { name: '🍖 Food', value: selectedBuild.food, inline: true },
+                                { name: '🧪 Potion', value: selectedBuild.potion, inline: true },
+                                { name: '🎯 Content Type', value: selectedBuild.contentType, inline: true }
                             )
                             .setFooter({ text: 'Phoenix Assistance Bot' })
                             .setTimestamp();
@@ -1024,16 +1013,16 @@ module.exports = {
                 const value = `build_${startIndex + index}`;
                 
                 // Create label that shows if it's a duplicate
-                let label = build.name;
-                const nameCount = currentBuilds.filter(b => b.name === build.name).length;
+                let label = selectedBuild.name;
+                const nameCount = currentBuilds.filter(b => b.name === selectedBuild.name).length;
                 if (nameCount > 1) {
-                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === build.name).length;
-                    label = `${build.name} (${duplicateIndex})`;
+                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === selectedBuild.name).length;
+                    label = `${selectedBuild.name} (${duplicateIndex})`;
                 }
                 
                 buildOptions.push(new StringSelectMenuOptionBuilder()
                     .setLabel(label)
-                    .setDescription(`${build.weapon || 'No weapon'} | ${build.contentType || 'General'}`)
+                    .setDescription(`${selectedBuild.weapon || 'No weapon'} | ${selectedBuild.contentType || 'General'}`)
                     .setValue(value)
                     .setEmoji('⚔️'));
             });
@@ -1139,6 +1128,184 @@ module.exports = {
         }
     },
 
+    async showDeleteBuildsPage(interaction, page) {
+        try {
+            const userId = interaction.user.id;
+            const deleteData = interaction.client.deleteData?.get(userId);
+            
+            if (!deleteData || !deleteData.allBuilds) {
+                await interaction.reply({
+                    content: '❌ Build delete data not found. Please try again.',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            const { allBuilds, buildsPerPage, contentType } = deleteData;
+            const totalBuilds = allBuilds.length;
+            const totalPages = Math.ceil(totalBuilds / buildsPerPage);
+            const startIndex = page * buildsPerPage;
+            const endIndex = Math.min(startIndex + buildsPerPage, totalBuilds);
+            const currentBuilds = allBuilds.slice(startIndex, endIndex);
+
+            console.log(`Build delete: Showing page ${page + 1}/${totalPages}, builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
+
+            // Create build options with unique values to handle duplicate names
+            const buildOptions = [];
+            
+            currentBuilds.forEach((build, index) => {
+                // Create unique value using build index to handle duplicate names
+                const value = `build_${startIndex + index}`;
+                
+                // Create label that shows if it's a duplicate
+                let label = selectedBuild.name;
+                const nameCount = currentBuilds.filter(b => b.name === selectedBuild.name).length;
+                if (nameCount > 1) {
+                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === selectedBuild.name).length;
+                    label = `${selectedBuild.name} (${duplicateIndex})`;
+                }
+                
+                buildOptions.push(new StringSelectMenuOptionBuilder()
+                    .setLabel(label)
+                    .setDescription(`${selectedBuild.weapon || 'No weapon'} | ${selectedBuild.contentType || 'General'}`)
+                    .setValue(value)
+                    .setEmoji('🗑️'));
+            });
+
+            const buildSelect = new StringSelectMenuBuilder()
+                .setCustomId('delete_build_name_select')
+                .setPlaceholder(`Select a build to delete (${startIndex + 1}-${endIndex} of ${totalBuilds})`)
+                .addOptions(buildOptions);
+
+            // Create pagination buttons
+            const paginationButtons = [];
+            
+            if (page > 0) {
+                paginationButtons.push(
+                    new ButtonBuilder()
+                        .setCustomId('delete_prev_page')
+                        .setLabel('◀️ Previous')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+            
+            if (page < totalPages - 1) {
+                paginationButtons.push(
+                    new ButtonBuilder()
+                        .setCustomId('delete_next_page')
+                        .setLabel('Next ▶️')
+                        .setStyle(ButtonStyle.Secondary)
+                );
+            }
+
+            const components = [new ActionRowBuilder().addComponents(buildSelect)];
+            
+            if (paginationButtons.length > 0) {
+                components.push(new ActionRowBuilder().addComponents(paginationButtons));
+            }
+
+            // Recreate the content type dropdown to maintain the interface
+            const contentTypeSelect = new StringSelectMenuBuilder()
+                .setCustomId('delete_content_type_select')
+                .setPlaceholder('Content type: ' + contentType)
+                .addOptions([
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('All Content Types')
+                        .setValue('all')
+                        .setEmoji('📋'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('General')
+                        .setValue('general')
+                        .setEmoji('⚔️'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('PvP')
+                        .setValue('pvp')
+                        .setEmoji('⚔️'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('PvE')
+                        .setValue('pve')
+                        .setEmoji('🛡️'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('Gathering')
+                        .setValue('gathering')
+                        .setEmoji('⛏️'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('Crafting')
+                        .setValue('crafting')
+                        .setEmoji('🔨'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('Fishing')
+                        .setValue('fishing')
+                        .setEmoji('🎣'),
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('Farming')
+                        .setValue('farming')
+                        .setEmoji('🌾')
+                ]);
+
+            const contentTypeRow = new ActionRowBuilder().addComponents(contentTypeSelect);
+            components.unshift(contentTypeRow);
+
+            let description = `Content Type: **${contentType === 'all' ? 'All Content Types' : contentType === 'general' ? 'General' : contentType}**\n\nShowing builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds.\n\nSelect a build from the menu below to delete it.`;
+            
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('🗑️ Build Delete')
+                .setDescription(description)
+                .setFooter({ text: `Phoenix Assistance Bot • Page ${page + 1} of ${totalPages}` })
+                .setTimestamp();
+
+            // Update the stored page
+            deleteData.currentPage = page;
+            interaction.client.deleteData.set(userId, deleteData);
+
+            await interaction.update({ embeds: [embed], components: components });
+        } catch (error) {
+            console.error('Error in showDeleteBuildsPage:', error);
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('An error occurred while loading builds.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            await interaction.update({ embeds: [embed], components: [] });
+        }
+    },
+
+    async handleDeletePaginationButton(interaction) {
+        try {
+            const customId = interaction.customId;
+            const userId = interaction.user.id;
+            const deleteData = interaction.client.deleteData?.get(userId);
+            
+            if (!deleteData) {
+                await interaction.reply({
+                    content: '❌ Build delete data not found. Please try again.',
+                    ephemeral: true
+                });
+                return;
+            }
+
+            let newPage = deleteData.currentPage;
+            
+            if (customId === 'delete_prev_page') {
+                newPage = Math.max(0, deleteData.currentPage - 1);
+            } else if (customId === 'delete_next_page') {
+                const totalPages = Math.ceil(deleteData.allBuilds.length / deleteData.buildsPerPage);
+                newPage = Math.min(totalPages - 1, deleteData.currentPage + 1);
+            }
+
+            await this.showDeleteBuildsPage(interaction, newPage);
+        } catch (error) {
+            console.error('Error handling delete pagination button:', error);
+            await interaction.reply({
+                content: '❌ An error occurred while changing pages. Please try again.',
+                ephemeral: true
+            });
+        }
+    },
+
     async handleListPaginationButton(interaction) {
         try {
             const customId = interaction.customId;
@@ -1200,24 +1367,18 @@ module.exports = {
                     
                     // Update the original message with builds and build name selection
                     try {
-                        // Create a build name dropdown if there are builds available
-                        let buildNameRow = null;
-                        if (builds.length > 0) {
-                            const buildNameSelect = new StringSelectMenuBuilder()
-                                .setCustomId('delete_build_name_select')
-                                .setPlaceholder('Select a build to delete')
-                                .addOptions(
-                                    builds.map(build => 
-                                        new StringSelectMenuOptionBuilder()
-                                            .setLabel(build.name)
-                                            .setDescription(`${build.weapon} | ${build.contentType}`)
-                                            .setValue(build.name)
-                                            .setEmoji('⚔️')
-                                    )
-                                );
-
-                            buildNameRow = new ActionRowBuilder().addComponents(buildNameSelect);
+                        // Store builds data for pagination
+                        if (!interaction.client.deleteData) {
+                            interaction.client.deleteData = new Map();
                         }
+                        listData.allBuilds = builds;
+                        listData.currentPage = 0;
+                        listData.buildsPerPage = 25;
+                        interaction.client.deleteData.set(userId, listData);
+                        
+                        // Show the first page of builds
+                        await this.showDeleteBuildsPage(interaction, 0);
+                        return;
 
                         // Recreate the content type dropdown to maintain the interface
                         const contentTypeSelect = new StringSelectMenuBuilder()
@@ -1275,41 +1436,50 @@ module.exports = {
                     }
                     return;
                 } else if (interaction.customId === 'delete_build_name_select') {
-                    // Handle build name selection
-                    const buildName = interaction.values[0];
-                    console.log('Build name selected for delete:', buildName);
+                    // Handle build selection
+                    const selectedValue = interaction.values[0];
+                    console.log('Build selected for delete:', selectedValue);
                     
-                    // Update the listData with the selected build name
-                    listData.buildName = buildName;
-                    interaction.client.listData.set(userId, listData);
-                    console.log('Updated listData with build name:', listData);
+                    // Extract build index from value (format: build_0, build_1, etc.)
+                    const buildIndex = parseInt(selectedValue.replace('build_', ''));
                     
-                    // Get the specific build details
-                    let builds;
-                    if (listData.contentType === 'all' || !listData.contentType) {
-                        builds = await db.getBuilds(interaction.guildId, null, buildName);
-                    } else {
-                        builds = await db.getBuilds(interaction.guildId, listData.contentType, buildName);
+                    // Get the specific build from the stored data
+                    const allBuilds = listData.allBuilds || [];
+                    const build = allBuilds[buildIndex];
+                    
+                    if (!build) {
+                        await interaction.reply({
+                            content: '❌ Build not found.',
+                            ephemeral: true
+                        });
+                        return;
                     }
                     
-                    if (builds.length > 0) {
-                        const build = builds[0]; // Should be the exact match
+                    // Update the listData with the selected build
+                    listData.selectedBuild = build;
+                    interaction.client.listData.set(userId, listData);
+                    console.log('Updated listData with selected build:', listData);
+                    
+                    // Show build details and confirmation
+                    const selectedBuild = listData.selectedBuild;
+                    
+                    if (selectedBuild) {
                         
                         // Create detailed build view embed
                         const detailedEmbed = new EmbedBuilder()
                             .setColor('#FF0000')
-                            .setTitle(`🗑️ ${build.name}`)
+                            .setTitle(`🗑️ ${selectedBuild.name}`)
                             .setDescription(`**Detailed Build Information**`)
                             .addFields(
-                                { name: '⚔️ Weapon', value: build.weapon, inline: true },
-                                { name: '🛡️ Offhand', value: build.offhand || 'None', inline: true },
-                                { name: '🧣 Cape', value: build.cape, inline: true },
-                                { name: '👑 Head', value: build.head, inline: true },
-                                { name: '🥋 Chest', value: build.chest, inline: true },
-                                { name: '👟 Shoes', value: build.shoes, inline: true },
-                                { name: '🍖 Food', value: build.food, inline: true },
-                                { name: '🧪 Potion', value: build.potion, inline: true },
-                                { name: '🎯 Content Type', value: build.contentType, inline: true }
+                                { name: '⚔️ Weapon', value: selectedBuild.weapon, inline: true },
+                                { name: '🛡️ Offhand', value: selectedBuild.offhand || 'None', inline: true },
+                                { name: '🧣 Cape', value: selectedBuild.cape, inline: true },
+                                { name: '👑 Head', value: selectedBuild.head, inline: true },
+                                { name: '🥋 Chest', value: selectedBuild.chest, inline: true },
+                                { name: '👟 Shoes', value: selectedBuild.shoes, inline: true },
+                                { name: '🍖 Food', value: selectedBuild.food, inline: true },
+                                { name: '🧪 Potion', value: selectedBuild.potion, inline: true },
+                                { name: '🎯 Content Type', value: selectedBuild.contentType, inline: true }
                             )
                             .setFooter({ text: 'Phoenix Assistance Bot' })
                             .setTimestamp();
@@ -1357,9 +1527,9 @@ module.exports = {
                                         .addOptions(
                                             builds.map(build => 
                                                 new StringSelectMenuOptionBuilder()
-                                                    .setLabel(build.name)
-                                                    .setDescription(`${build.weapon} | ${build.contentType}`)
-                                                    .setValue(build.name)
+                                                    .setLabel(selectedBuild.name)
+                                                    .setDescription(`${selectedBuild.weapon} | ${selectedBuild.contentType}`)
+                                                    .setValue(selectedBuild.name)
                                                     .setEmoji('⚔️')
                                             )
                                         )
@@ -1574,7 +1744,7 @@ module.exports = {
         
         chunks.forEach((chunk, index) => {
             const buildList = chunk.map(build => 
-                `• **${build.name}**`
+                `• **${selectedBuild.name}**`
             ).join('\n');
 
             embed.addFields({
@@ -1608,18 +1778,24 @@ module.exports = {
                 return;
             }
 
-            let success = false;
-            if (contentType === 'all') {
-                success = await db.deleteBuild(interaction.guildId, buildName);
-            } else {
-                success = await db.deleteBuild(interaction.guildId, buildName);
+            // Get the selected build from the stored data
+            const deleteData = interaction.client.deleteData?.get(userId);
+            if (!deleteData || !deleteData.selectedBuild) {
+                await interaction.reply({
+                    content: '❌ Build data not found. Please try again.',
+                    ephemeral: true
+                });
+                return;
             }
+
+            const build = deleteData.selectedBuild;
+            const success = await db.deleteBuildById(interaction.guildId, build.buildId);
 
             if (success) {
                 const embed = new EmbedBuilder()
                     .setColor('#00FF00')
                     .setTitle('✅ Build Deleted Successfully!')
-                    .setDescription(`**${buildName}** has been removed from your guild's builds.`)
+                    .setDescription(`**${selectedBuild.name}** has been removed from your guild's builds.`)
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
                 

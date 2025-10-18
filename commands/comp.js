@@ -1162,23 +1162,12 @@ module.exports = {
 
     async ensureMigration(guildId, db, client) {
         try {
-            // Check if migration has already been run for this guild
-            const migrationKey = `migration_${guildId}`;
-            if (client.migrationStatus?.get(migrationKey)) {
-                return; // Migration already completed
-            }
-
             console.log(`Checking if migration is needed for guild ${guildId}...`);
             
-            // Run migration
+            // Run migration (it will check database for completion status)
             const success = await db.migrateAllLegacyData(guildId);
             
             if (success) {
-                // Mark migration as completed
-                if (!client.migrationStatus) {
-                    client.migrationStatus = new Map();
-                }
-                client.migrationStatus.set(migrationKey, true);
                 console.log(`Migration completed for guild ${guildId}`);
             }
         } catch (error) {
