@@ -854,7 +854,7 @@ module.exports = {
                         interaction.client.listData.set(userId, listData);
                         
                         // Show the first page of builds
-                        await this.showBuildsListPage(interaction, 0);
+                        await this.showBuildsListPage(interaction, 0, db);
                         return;
 
                         // Recreate the content type dropdown to maintain the interface
@@ -983,7 +983,7 @@ module.exports = {
         }
     },
 
-    async showBuildsListPage(interaction, page) {
+    async showBuildsListPage(interaction, page, db) {
         try {
             const userId = interaction.user.id;
             const listData = interaction.client.listData?.get(userId);
@@ -1140,7 +1140,7 @@ module.exports = {
         }
     },
 
-    async showDeleteBuildsPage(interaction, page) {
+    async showDeleteBuildsPage(interaction, page, db) {
         try {
             const userId = interaction.user.id;
             const deleteData = interaction.client.deleteData?.get(userId);
@@ -1297,7 +1297,7 @@ module.exports = {
         }
     },
 
-    async handleDeletePaginationButton(interaction) {
+    async handleDeletePaginationButton(interaction, db) {
         try {
             const customId = interaction.customId;
             const userId = interaction.user.id;
@@ -1320,7 +1320,7 @@ module.exports = {
                 newPage = Math.min(totalPages - 1, deleteData.currentPage + 1);
             }
 
-            await this.showDeleteBuildsPage(interaction, newPage);
+            await this.showDeleteBuildsPage(interaction, newPage, db);
         } catch (error) {
             console.error('Error handling delete pagination button:', error);
             await interaction.reply({
@@ -1330,7 +1330,7 @@ module.exports = {
         }
     },
 
-    async handleListPaginationButton(interaction) {
+    async handleListPaginationButton(interaction, db) {
         try {
             const customId = interaction.customId;
             const userId = interaction.user.id;
@@ -1353,7 +1353,7 @@ module.exports = {
                 newPage = Math.min(totalPages - 1, listData.currentPage + 1);
             }
 
-            await this.showBuildsListPage(interaction, newPage);
+            await this.showBuildsListPage(interaction, newPage, db);
         } catch (error) {
             console.error('Error handling list pagination button:', error);
             await interaction.reply({
@@ -1401,7 +1401,7 @@ module.exports = {
                         interaction.client.deleteData.set(userId, listData);
                         
                         // Show the first page of builds
-                        await this.showDeleteBuildsPage(interaction, 0);
+                        await this.showDeleteBuildsPage(interaction, 0, db);
                         return;
 
                         // Recreate the content type dropdown to maintain the interface

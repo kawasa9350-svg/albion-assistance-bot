@@ -566,7 +566,7 @@ client.handleButtonInteraction = async (interaction) => {
         // This is a build list pagination button
         const buildCommand = client.commands.get('build');
         if (buildCommand && buildCommand.handleListPaginationButton) {
-            await buildCommand.handleListPaginationButton(interaction);
+            await buildCommand.handleListPaginationButton(interaction, buildCommand.dbManager);
         } else {
             console.error('Build command or handleListPaginationButton method not found');
         }
@@ -576,7 +576,7 @@ client.handleButtonInteraction = async (interaction) => {
         // This is a build delete pagination button
         const buildCommand = client.commands.get('build');
         if (buildCommand && buildCommand.handleDeletePaginationButton) {
-            await buildCommand.handleDeletePaginationButton(interaction);
+            await buildCommand.handleDeletePaginationButton(interaction, buildCommand.dbManager);
         } else {
             console.error('Build command or handleDeletePaginationButton method not found');
         }
