@@ -798,6 +798,24 @@ module.exports = {
         }
     },
 
+    async getAllBuildsForList(guildId, db) {
+        try {
+            // Get all builds from the guild document (both global and comp-specific)
+            const collection = await db.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.builds) {
+                return [];
+            }
+            
+            // Return all builds (both global and comp-specific)
+            return guild.builds;
+        } catch (error) {
+            console.error('❌ Failed to get all builds for list:', error);
+            return [];
+        }
+    },
+
     async ensureMigration(guildId, db, client) {
         try {
             console.log(`Checking if migration is needed for guild ${guildId}...`);
@@ -834,9 +852,12 @@ module.exports = {
                     // Get builds based on selection
                     let builds;
                     if (selectedContentType === 'all') {
-                        builds = await db.getBuilds(interaction.guildId, null, null);
+                        // For 'all', get all builds (both global and comp-specific)
+                        builds = await this.getAllBuildsForList(interaction.guildId, db);
                     } else {
-                        builds = await db.getBuilds(interaction.guildId, selectedContentType, null);
+                        // For specific content types, get all builds and filter by content type
+                        builds = await this.getAllBuildsForList(interaction.guildId, db);
+                        builds = builds.filter(build => build.contentType === selectedContentType);
                     }
 
                     // Create the builds display embed
@@ -1381,9 +1402,12 @@ module.exports = {
                     // Get builds based on selection
                     let builds;
                     if (selectedContentType === 'all') {
-                        builds = await db.getBuilds(interaction.guildId, null, null);
+                        // For 'all', get all builds (both global and comp-specific)
+                        builds = await this.getAllBuildsForList(interaction.guildId, db);
                     } else {
-                        builds = await db.getBuilds(interaction.guildId, selectedContentType, null);
+                        // For specific content types, get all builds and filter by content type
+                        builds = await this.getAllBuildsForList(interaction.guildId, db);
+                        builds = builds.filter(build => build.contentType === selectedContentType);
                     }
 
                     // Create the builds display embed
@@ -1644,9 +1668,18 @@ module.exports = {
                 // Get builds with both content type and name filters
                 let builds;
                 if (listData.contentType === 'all' || !listData.contentType) {
-                    builds = await db.getBuilds(interaction.guildId, null, buildName);
+                    // Get all builds and filter by name
+                    builds = await this.getAllBuildsForList(interaction.guildId, db);
+                    if (buildName) {
+                        builds = builds.filter(build => build.name.toLowerCase().includes(buildName.toLowerCase()));
+                    }
                 } else {
-                    builds = await db.getBuilds(interaction.guildId, listData.contentType, buildName);
+                    // Get all builds and filter by content type and name
+                    builds = await this.getAllBuildsForList(interaction.guildId, db);
+                    builds = builds.filter(build => build.contentType === listData.contentType);
+                    if (buildName) {
+                        builds = builds.filter(build => build.name.toLowerCase().includes(buildName.toLowerCase()));
+                    }
                 }
 
                 // Create the builds display embed
@@ -1680,9 +1713,18 @@ module.exports = {
                 // Get builds with both content type and name filters
                 let builds;
                 if (listData.contentType === 'all' || !listData.contentType) {
-                    builds = await db.getBuilds(interaction.guildId, null, buildName);
+                    // Get all builds and filter by name
+                    builds = await this.getAllBuildsForList(interaction.guildId, db);
+                    if (buildName) {
+                        builds = builds.filter(build => build.name.toLowerCase().includes(buildName.toLowerCase()));
+                    }
                 } else {
-                    builds = await db.getBuilds(interaction.guildId, listData.contentType, buildName);
+                    // Get all builds and filter by content type and name
+                    builds = await this.getAllBuildsForList(interaction.guildId, db);
+                    builds = builds.filter(build => build.contentType === listData.contentType);
+                    if (buildName) {
+                        builds = builds.filter(build => build.name.toLowerCase().includes(buildName.toLowerCase()));
+                    }
                 }
 
                 // Create the builds display embed for deletion
