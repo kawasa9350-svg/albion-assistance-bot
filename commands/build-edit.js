@@ -448,17 +448,8 @@ module.exports = {
                 return interaction.update({ embeds: [embed], components: [] });
             }
             
-            // Get all builds and find the one at the specified index
-            let builds;
-            if (editData.selectedContentType === 'all') {
-                builds = await db.getBuilds(interaction.guildId);
-            } else if (editData.selectedContentType === 'general') {
-                builds = await db.getBuilds(interaction.guildId);
-                builds = builds.filter(build => !build.contentType || build.contentType === '' || build.contentType === 'General');
-            } else {
-                builds = await db.getBuilds(interaction.guildId, editData.selectedContentType);
-            }
-            
+            // Get the build from the already retrieved builds (includes comp-specific builds)
+            const builds = editData.allBuilds || [];
             const build = builds[buildIndex];
             
             if (!build) {
