@@ -940,18 +940,18 @@ module.exports = {
                         // Create detailed build view embed
                         const detailedEmbed = new EmbedBuilder()
                             .setColor('#00FF00')
-                            .setTitle(`⚔️ ${selectedBuild.name}`)
+                            .setTitle(`⚔️ ${build.name}`)
                             .setDescription(`**Detailed Build Information**`)
                             .addFields(
-                                { name: '⚔️ Weapon', value: selectedBuild.weapon, inline: true },
-                                { name: '🛡️ Offhand', value: selectedBuild.offhand || 'None', inline: true },
-                                { name: '🧣 Cape', value: selectedBuild.cape, inline: true },
-                                { name: '👑 Head', value: selectedBuild.head, inline: true },
-                                { name: '🥋 Chest', value: selectedBuild.chest, inline: true },
-                                { name: '👟 Shoes', value: selectedBuild.shoes, inline: true },
-                                { name: '🍖 Food', value: selectedBuild.food, inline: true },
-                                { name: '🧪 Potion', value: selectedBuild.potion, inline: true },
-                                { name: '🎯 Content Type', value: selectedBuild.contentType, inline: true }
+                                { name: '⚔️ Weapon', value: build.weapon, inline: true },
+                                { name: '🛡️ Offhand', value: build.offhand || 'None', inline: true },
+                                { name: '🧣 Cape', value: build.cape, inline: true },
+                                { name: '👑 Head', value: build.head, inline: true },
+                                { name: '🥋 Chest', value: build.chest, inline: true },
+                                { name: '👟 Shoes', value: build.shoes, inline: true },
+                                { name: '🍖 Food', value: build.food, inline: true },
+                                { name: '🧪 Potion', value: build.potion, inline: true },
+                                { name: '🎯 Content Type', value: build.contentType, inline: true }
                             )
                             .setFooter({ text: 'Phoenix Assistance Bot' })
                             .setTimestamp();
@@ -970,7 +970,7 @@ module.exports = {
                         console.log('Build details displayed successfully');
                     } else {
                         await interaction.update({
-                            content: `❌ Build "${buildName}" not found.`,
+                            content: `❌ Build not found.`,
                             ephemeral: true
                         });
                     }
@@ -1594,7 +1594,7 @@ module.exports = {
                         console.log('Build details displayed successfully for deletion');
                     } else {
                         await interaction.update({
-                            content: `❌ Build "${buildName}" not found.`,
+                            content: `❌ Build not found.`,
                             ephemeral: true
                         });
                     }
