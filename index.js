@@ -394,7 +394,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             await voiceChannelCommand.handleVoiceStateUpdate(oldState, newState, client);
         }
     } catch (error) {
-        console.error('Error handling voice state update:', error);
+        console.error('❌ Error handling voice state update:', error);
     }
 });
 

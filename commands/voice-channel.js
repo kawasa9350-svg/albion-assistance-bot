@@ -265,6 +265,7 @@ module.exports = {
                 const setup = client.voiceChannelSetups?.get(guildId);
                 
                 if (setup && newState.channelId === setup.channelId) {
+                    console.log(`🎯 User joined join-to-create channel, creating temporary channel`);
                     // User joined the join-to-create channel
                     await this.createTemporaryChannel(newState, setup);
                 }
@@ -283,13 +284,14 @@ module.exports = {
                 const setup = client.voiceChannelSetups?.get(guildId);
                 
                 if (setup && newState.channelId === setup.channelId) {
+                    console.log(`🎯 User moved to join-to-create channel, creating temporary channel`);
                     // User moved to the join-to-create channel
                     await this.createTemporaryChannel(newState, setup);
                 }
             }
 
         } catch (error) {
-            console.error('Error handling voice state update:', error);
+            console.error('❌ Error handling voice state update:', error);
         }
     },
 
@@ -345,7 +347,10 @@ module.exports = {
     async cleanupEmptyChannel(voiceState) {
         try {
             const channel = voiceState.channel;
-            if (!channel || channel.type !== ChannelType.GuildVoice) return;
+            
+            if (!channel || channel.type !== ChannelType.GuildVoice) {
+                return;
+            }
 
             // Check if channel is empty
             if (channel.members.size === 0) {
@@ -360,24 +365,15 @@ module.exports = {
                     channel.id !== setup.channelId && 
                     channel.name.endsWith("'s Channel")) {
                     
-                    // Additional safety check: verify the channel was created recently (within last hour)
-                    const channelAge = Date.now() - channel.createdTimestamp;
-                    const oneHour = 60 * 60 * 1000; // 1 hour in milliseconds
-                    
-                    if (channelAge < oneHour) {
-                        // This is a temporary channel created by our bot, delete it
-                        await channel.delete();
-                        console.log(`Deleted empty temporary voice channel: ${channel.name}`);
-                    } else {
-                        console.log(`Skipped deletion of old channel: ${channel.name} (created ${Math.round(channelAge / 60000)} minutes ago)`);
-                    }
-                } else {
-                    console.log(`Skipped deletion of channel: ${channel.name} (not created by join-to-create system)`);
+                    // This is a temporary channel created by our bot, delete it immediately when empty
+                    console.log(`🗑️ Deleting empty temporary voice channel: ${channel.name}`);
+                    await channel.delete();
+                    console.log(`✅ Successfully deleted empty temporary voice channel: ${channel.name}`);
                 }
             }
 
         } catch (error) {
-            console.error('Error cleaning up empty channel:', error);
+            console.error('❌ Error cleaning up empty channel:', error);
         }
     }
 };
