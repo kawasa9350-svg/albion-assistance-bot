@@ -326,10 +326,14 @@ module.exports = {
                 type: 1 // Member type
             });
             
+            // Get the position of the join-to-create channel to place the new channel right after it
+            const joinToCreatePosition = joinToCreateChannel.position;
+            
             const tempChannel = await guild.channels.create({
                 name: channelName,
                 type: ChannelType.GuildVoice,
                 parent: setup.categoryId,
+                position: joinToCreatePosition + 1, // Place directly under the join-to-create channel
                 userLimit: setup.userLimit,
                 permissionOverwrites: permissionOverwrites
             });
@@ -337,7 +341,7 @@ module.exports = {
             // Move the user to the new channel
             await voiceState.member.voice.setChannel(tempChannel);
 
-            console.log(`Created temporary voice channel "${channelName}" for user ${user.username}`);
+            console.log(`Created temporary voice channel "${channelName}" for user ${user.username} at position ${joinToCreatePosition + 1}`);
 
         } catch (error) {
             console.error('Error creating temporary voice channel:', error);
