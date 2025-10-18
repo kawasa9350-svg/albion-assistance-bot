@@ -235,7 +235,7 @@ module.exports = {
             });
 
             // Show the first page of builds
-            await this.showBuildsPage(interaction, 0);
+            await this.showBuildsPage(interaction, 0, db);
         } catch (error) {
             console.error('Error in handleContentTypeSelection:', error);
             const embed = new EmbedBuilder()
@@ -249,7 +249,7 @@ module.exports = {
         }
     },
 
-    async showBuildsPage(interaction, page) {
+    async showBuildsPage(interaction, page, db) {
         try {
             const editData = interaction.client.editBuildData?.get(interaction.user.id);
             if (!editData) {
@@ -1038,7 +1038,7 @@ module.exports = {
         }
     },
 
-    async handlePaginationButton(interaction) {
+    async handlePaginationButton(interaction, db) {
         try {
             const customId = interaction.customId;
             const editData = interaction.client.editBuildData?.get(interaction.user.id);
@@ -1060,7 +1060,7 @@ module.exports = {
                 newPage = Math.min(totalPages - 1, editData.currentPage + 1);
             }
 
-            await this.showBuildsPage(interaction, newPage);
+            await this.showBuildsPage(interaction, newPage, db);
         } catch (error) {
             console.error('Error handling pagination button:', error);
             await interaction.reply({

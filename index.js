@@ -460,7 +460,7 @@ client.handleButtonInteraction = async (interaction) => {
         // This is a build edit pagination button
         const buildEditCommand = client.commands.get('build-edit');
         if (buildEditCommand && buildEditCommand.handlePaginationButton) {
-            await buildEditCommand.handlePaginationButton(interaction);
+            await buildEditCommand.handlePaginationButton(interaction, buildEditCommand.dbManager);
         } else {
             console.error('Build-edit command or handlePaginationButton method not found');
         }
