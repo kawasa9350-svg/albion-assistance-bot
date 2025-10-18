@@ -141,6 +141,24 @@ module.exports = {
         }
     },
 
+    async getAllBuildsForEdit(guildId, db) {
+        try {
+            // Get all builds from the guild document (both global and comp-specific)
+            const collection = await db.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            
+            if (!guild || !guild.builds) {
+                return [];
+            }
+            
+            // Return all builds (both global and comp-specific)
+            return guild.builds;
+        } catch (error) {
+            console.error('❌ Failed to get all builds for edit:', error);
+            return [];
+        }
+    },
+
     async ensureMigration(guildId, db, client) {
         try {
             console.log(`Checking if migration is needed for guild ${guildId}...`);
@@ -168,26 +186,19 @@ module.exports = {
             // Get builds based on selected content type
             let builds;
             if (selectedContentType === 'all') {
-                // For 'all', get all builds without any filtering
-                builds = await db.getBuilds(interaction.guildId);
+                // For 'all', get all builds (both global and comp-specific)
+                builds = await this.getAllBuildsForEdit(interaction.guildId, db);
                 console.log(`Build-edit: Retrieved ${builds ? builds.length : 0} builds for 'all' content type`);
-                
-                // If no builds found, try to get all builds from the guild document directly as fallback
-                if (!builds || builds.length === 0) {
-                    console.log('Build-edit: No builds found via getBuilds, trying direct guild query...');
-                    const guild = await db.getGuildCollection(interaction.guildId);
-                    const guildData = await guild.findOne({ guildId: interaction.guildId });
-                    builds = guildData?.builds || [];
-                    console.log(`Build-edit: Direct guild query found ${builds.length} builds`);
-                }
             } else if (selectedContentType === 'general') {
                 // For general builds, get all builds and filter for those without content type or with empty content type
-                builds = await db.getBuilds(interaction.guildId);
+                builds = await this.getAllBuildsForEdit(interaction.guildId, db);
                 builds = builds.filter(build => !build.contentType || build.contentType === '' || build.contentType === 'General');
                 console.log(`Build-edit: Filtered to ${builds ? builds.length : 0} general builds`);
             } else {
-                builds = await db.getBuilds(interaction.guildId, selectedContentType);
-                console.log(`Build-edit: Retrieved ${builds ? builds.length : 0} builds for content type: ${selectedContentType}`);
+                // For specific content types, get all builds and filter by content type
+                builds = await this.getAllBuildsForEdit(interaction.guildId, db);
+                builds = builds.filter(build => build.contentType === selectedContentType);
+                console.log(`Build-edit: Filtered to ${builds ? builds.length : 0} builds for content type: ${selectedContentType}`);
             }
             
             if (!builds || builds.length === 0) {
@@ -255,9 +266,7 @@ module.exports = {
             console.log(`Build-edit: Showing page ${page + 1}/${totalPages}, builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
 
             // Create build options with unique values to handle duplicate names
-            const buildOptions = [];
-            
-            currentBuilds.forEach((build, index) => {
+            const buildOptions = await Promise.all(currentBuilds.map(async (build, index) => {
                 const weapon = build.weapon || 'No weapon';
                 const offhand = build.offhand || 'No offhand';
                 const cape = build.cape || 'No cape';
@@ -315,6 +324,13 @@ module.exports = {
                     description += ` | No equipment specified`;
                 }
                 
+                // Add comp info
+                if (build.compId) {
+                    description += ` | Comp-specific`;
+                } else {
+                    description += ` | Global`;
+                }
+                
                 // Ensure description doesn't exceed 100 characters
                 if (description.length > 100) {
                     description = description.substring(0, 97) + '...';
@@ -323,19 +339,33 @@ module.exports = {
                 // Create unique value using build index to handle duplicate names
                 const value = `build_${startIndex + index}`;
                 
-                // Create label that shows if it's a duplicate
+                // Create label that shows comp name and if it's a duplicate
                 let label = build.name;
+                
+                // Add comp name if it's a comp-specific build
+                if (build.compId) {
+                    const compName = await db.getCompNameById(interaction.guildId, build.compId);
+                    if (compName) {
+                        label = `${build.name} - ${compName}`;
+                    }
+                }
+                
                 const nameCount = currentBuilds.filter(b => b.name === build.name).length;
                 if (nameCount > 1) {
                     const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === build.name).length;
-                    label = `${build.name} (${duplicateIndex})`;
+                    if (build.compId) {
+                        const compName = await db.getCompNameById(interaction.guildId, build.compId);
+                        label = `${build.name} - ${compName || 'Unknown Comp'} (${duplicateIndex})`;
+                    } else {
+                        label = `${build.name} (${duplicateIndex})`;
+                    }
                 }
                 
-                buildOptions.push(new StringSelectMenuOptionBuilder()
+                return new StringSelectMenuOptionBuilder()
                     .setLabel(label)
                     .setDescription(description)
-                    .setValue(value));
-            });
+                    .setValue(value);
+            }));
 
             const buildSelect = new StringSelectMenuBuilder()
                 .setCustomId('build_edit_select')

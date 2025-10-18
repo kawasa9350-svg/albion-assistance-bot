@@ -1006,26 +1006,38 @@ module.exports = {
             console.log(`Build list: Showing page ${page + 1}/${totalPages}, builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
 
             // Create build options with unique values to handle duplicate names
-            const buildOptions = [];
-            
-            currentBuilds.forEach((build, index) => {
+            const buildOptions = await Promise.all(currentBuilds.map(async (build, index) => {
                 // Create unique value using build index to handle duplicate names
                 const value = `build_${startIndex + index}`;
                 
-                // Create label that shows if it's a duplicate
-                let label = selectedBuild.name;
-                const nameCount = currentBuilds.filter(b => b.name === selectedBuild.name).length;
-                if (nameCount > 1) {
-                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === selectedBuild.name).length;
-                    label = `${selectedBuild.name} (${duplicateIndex})`;
+                // Create label that shows comp name and if it's a duplicate
+                let label = build.name;
+                
+                // Add comp name if it's a comp-specific build
+                if (build.compId) {
+                    const compName = await db.getCompNameById(interaction.guildId, build.compId);
+                    if (compName) {
+                        label = `${build.name} - ${compName}`;
+                    }
                 }
                 
-                buildOptions.push(new StringSelectMenuOptionBuilder()
+                const nameCount = currentBuilds.filter(b => b.name === build.name).length;
+                if (nameCount > 1) {
+                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === build.name).length;
+                    if (build.compId) {
+                        const compName = await db.getCompNameById(interaction.guildId, build.compId);
+                        label = `${build.name} - ${compName || 'Unknown Comp'} (${duplicateIndex})`;
+                    } else {
+                        label = `${build.name} (${duplicateIndex})`;
+                    }
+                }
+                
+                return new StringSelectMenuOptionBuilder()
                     .setLabel(label)
-                    .setDescription(`${selectedBuild.weapon || 'No weapon'} | ${selectedBuild.contentType || 'General'}`)
+                    .setDescription(`${build.weapon || 'No weapon'} | ${build.contentType || 'General'}`)
                     .setValue(value)
-                    .setEmoji('⚔️'));
-            });
+                    .setEmoji('⚔️');
+            }));
 
             const buildSelect = new StringSelectMenuBuilder()
                 .setCustomId('list_build_name_select')
@@ -1151,26 +1163,38 @@ module.exports = {
             console.log(`Build delete: Showing page ${page + 1}/${totalPages}, builds ${startIndex + 1}-${endIndex} of ${totalBuilds} total builds`);
 
             // Create build options with unique values to handle duplicate names
-            const buildOptions = [];
-            
-            currentBuilds.forEach((build, index) => {
+            const buildOptions = await Promise.all(currentBuilds.map(async (build, index) => {
                 // Create unique value using build index to handle duplicate names
                 const value = `build_${startIndex + index}`;
                 
-                // Create label that shows if it's a duplicate
-                let label = selectedBuild.name;
-                const nameCount = currentBuilds.filter(b => b.name === selectedBuild.name).length;
-                if (nameCount > 1) {
-                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === selectedBuild.name).length;
-                    label = `${selectedBuild.name} (${duplicateIndex})`;
+                // Create label that shows comp name and if it's a duplicate
+                let label = build.name;
+                
+                // Add comp name if it's a comp-specific build
+                if (build.compId) {
+                    const compName = await db.getCompNameById(interaction.guildId, build.compId);
+                    if (compName) {
+                        label = `${build.name} - ${compName}`;
+                    }
                 }
                 
-                buildOptions.push(new StringSelectMenuOptionBuilder()
+                const nameCount = currentBuilds.filter(b => b.name === build.name).length;
+                if (nameCount > 1) {
+                    const duplicateIndex = currentBuilds.slice(0, index + 1).filter(b => b.name === build.name).length;
+                    if (build.compId) {
+                        const compName = await db.getCompNameById(interaction.guildId, build.compId);
+                        label = `${build.name} - ${compName || 'Unknown Comp'} (${duplicateIndex})`;
+                    } else {
+                        label = `${build.name} (${duplicateIndex})`;
+                    }
+                }
+                
+                return new StringSelectMenuOptionBuilder()
                     .setLabel(label)
-                    .setDescription(`${selectedBuild.weapon || 'No weapon'} | ${selectedBuild.contentType || 'General'}`)
+                    .setDescription(`${build.weapon || 'No weapon'} | ${build.contentType || 'General'}`)
                     .setValue(value)
-                    .setEmoji('🗑️'));
-            });
+                    .setEmoji('🗑️');
+            }));
 
             const buildSelect = new StringSelectMenuBuilder()
                 .setCustomId('delete_build_name_select')
@@ -1527,9 +1551,9 @@ module.exports = {
                                         .addOptions(
                                             builds.map(build => 
                                                 new StringSelectMenuOptionBuilder()
-                                                    .setLabel(selectedBuild.name)
-                                                    .setDescription(`${selectedBuild.weapon} | ${selectedBuild.contentType}`)
-                                                    .setValue(selectedBuild.name)
+                                                    .setLabel(build.name)
+                                                    .setDescription(`${build.weapon} | ${build.contentType}`)
+                                                    .setValue(build.name)
                                                     .setEmoji('⚔️')
                                             )
                                         )
@@ -1744,7 +1768,7 @@ module.exports = {
         
         chunks.forEach((chunk, index) => {
             const buildList = chunk.map(build => 
-                `• **${selectedBuild.name}**`
+                `• **${build.name}**`
             ).join('\n');
 
             embed.addFields({
@@ -1795,7 +1819,7 @@ module.exports = {
                 const embed = new EmbedBuilder()
                     .setColor('#00FF00')
                     .setTitle('✅ Build Deleted Successfully!')
-                    .setDescription(`**${selectedBuild.name}** has been removed from your guild's builds.`)
+                    .setDescription(`**${build.name}** has been removed from your guild's builds.`)
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
                 

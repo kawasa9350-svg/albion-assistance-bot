@@ -1001,6 +1001,23 @@ class DatabaseManager {
         }
     }
 
+    async getCompNameById(guildId, compId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const comp = await collection.findOne({ compId: compId });
+            
+            if (!comp) {
+                console.log(`Comp not found for compId: ${compId}`);
+                return null;
+            }
+            
+            return comp.name;
+        } catch (error) {
+            console.error('❌ Failed to get comp name by ID:', error);
+            return null;
+        }
+    }
+
     async migrateLegacyComp(guildId, comp) {
         try {
             console.log(`Migrating legacy comp: ${comp.name}`);
