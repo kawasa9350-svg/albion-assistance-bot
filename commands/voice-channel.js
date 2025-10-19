@@ -274,11 +274,15 @@ module.exports = {
             // Check if user left a voice channel
             if (oldState.channelId && !newState.channelId) {
                 await this.cleanupEmptyChannel(oldState);
+                // Also check all channels in the guild for cleanup
+                await this.checkAllChannelsForCleanup(newState.guild);
             }
 
             // Check if user moved between channels
             if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
                 await this.cleanupEmptyChannel(oldState);
+                // Also check all channels in the guild for cleanup
+                await this.checkAllChannelsForCleanup(newState.guild);
                 
                 const guildId = newState.guild.id;
                 const setup = client.voiceChannelSetups?.get(guildId);
@@ -378,6 +382,39 @@ module.exports = {
 
         } catch (error) {
             console.error('❌ Error cleaning up empty channel:', error);
+        }
+    },
+
+    // New method to check all channels for cleanup
+    async checkAllChannelsForCleanup(guild) {
+        try {
+            const setup = guild.client.voiceChannelSetups?.get(guild.id);
+            if (!setup) return;
+
+            // Get all voice channels in the same category as the setup
+            const category = guild.channels.cache.get(setup.categoryId);
+            if (!category) return;
+
+            const voiceChannels = category.children.cache.filter(channel => 
+                channel.type === ChannelType.GuildVoice && 
+                channel.id !== setup.channelId &&
+                channel.name.endsWith("'s Channel")
+            );
+
+            // Check each temporary channel
+            for (const [channelId, channel] of voiceChannels) {
+                if (channel.members.size === 0) {
+                    console.log(`🗑️ Found empty temporary voice channel during cleanup check: ${channel.name}`);
+                    try {
+                        await channel.delete();
+                        console.log(`✅ Successfully deleted empty temporary voice channel: ${channel.name}`);
+                    } catch (deleteError) {
+                        console.error(`❌ Failed to delete channel ${channel.name}:`, deleteError);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error checking all channels for cleanup:', error);
         }
     }
 };
