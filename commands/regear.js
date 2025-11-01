@@ -724,9 +724,9 @@ module.exports = {
                 return;
             }
 
-            // Get issuer info
+            // Get issuer info (only show mention, no username/tag)
             const issuer = interaction.user;
-            const issuerInfo = `${issuer.tag} (${issuer.id})`;
+            const issuerInfo = `<@${issuer.id}>`;
 
             // Get recipient info (only show mention, no username/tag)
             const recipientId = selections.targetUserId || 'Unknown';
