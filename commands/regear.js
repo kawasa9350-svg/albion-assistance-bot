@@ -776,8 +776,7 @@ module.exports = {
                 return value;
             };
             
-            // Format as CSV (comma-separated values) for easy copy-paste to Google Sheets
-            const csvHeader = 'Date,Player,Main-hand,Off-hand,Head,Chest,Shoes,Tier,Given By';
+            // Format as CSV (comma-separated values) - no headers as requested
             const csvRow = [
                 date,
                 escapeCSV(recipientTag),
@@ -790,13 +789,15 @@ module.exports = {
                 escapeCSV(issuer.tag)
             ].join(',');
 
-            // Format as CSV for Discord (easier to copy and paste into Google Sheets)
-            const csvTable = `\`\`\`
-${csvHeader}
-${csvRow}
-\`\`\`
-
-**📋 Copy the CSV above and paste into Google Sheets - it will automatically separate into columns**`;
+            // Create CSV file as Buffer
+            const csvContent = csvRow + '\n';
+            const csvBuffer = Buffer.from(csvContent, 'utf-8');
+            
+            // Create attachment
+            const csvAttachment = {
+                attachment: csvBuffer,
+                name: `regear_${Date.now()}.csv`
+            };
 
             const logEmbed = new EmbedBuilder()
                 .setColor('#0099FF')
@@ -810,9 +811,11 @@ ${csvRow}
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            // Send embed and CSV format
-            await logChannel.send({ embeds: [logEmbed] });
-            await logChannel.send(csvTable);
+            // Send embed with CSV file attachment
+            await logChannel.send({ 
+                embeds: [logEmbed],
+                files: [csvAttachment]
+            });
         } catch (error) {
             console.error('Error logging regear to channel:', error);
             // Don't throw - logging failure shouldn't break the regear process
