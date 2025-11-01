@@ -242,6 +242,7 @@ module.exports = {
                 
                 rows.push(new ActionRowBuilder().addComponents(selectMenu));
             }
+            }
         }
 
         // Build selected items display
@@ -373,11 +374,16 @@ module.exports = {
 
             await interaction.deferUpdate();
 
-            // Process each selection
+            // Process each selection (skip selectedTier, only process slot selections)
             const results = [];
             const errors = [];
 
             for (const [slot, selection] of Object.entries(selections)) {
+                // Skip selectedTier, only process actual slot selections
+                if (slot === 'selectedTier') {
+                    continue;
+                }
+                
                 const result = await db.removeGearFromInventory(
                     interaction.guildId,
                     selection.name,

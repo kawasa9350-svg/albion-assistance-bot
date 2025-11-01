@@ -10,7 +10,7 @@
     "start:deploy": "node deploy-commands.js && node index.js",
     "start:auto": "node start-with-deploy.js",
     "build": "npm install --production",
-    "postinstall": "npm run deploy || true"
+    "postinstall": "npm run deploy"
   },
   "keywords": ["discord", "bot", "albion", "mongodb", "gaming"],
   "author": "Your Name",
