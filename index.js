@@ -580,6 +580,19 @@ client.handleButtonInteraction = async (interaction) => {
         } else {
             console.error('Build command or handleDeletePaginationButton method not found');
         }
+    } else if (customId === 'regear_confirm' || customId === 'regear_cancel') {
+        console.log('Regear button detected, routing to regear command');
+        
+        // This is a regear confirm/cancel button
+        const regearCommand = client.commands.get('regear');
+        if (regearCommand && regearCommand.handleButtonInteraction) {
+            const handled = await regearCommand.handleButtonInteraction(interaction, regearCommand.dbManager);
+            if (!handled) {
+                console.error('Regear button interaction was not handled');
+            }
+        } else {
+            console.error('Regear command or handleButtonInteraction method not found');
+        }
     }
 };
 

@@ -22,6 +22,12 @@ function sortItemsByTierAndName(items) {
     });
 }
 
+// Helper function to format slot name for display (handles hyphens)
+function formatSlotName(slot) {
+    // Handle hyphenated slots like "main-hand" and "off-hand"
+    return slot.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('-');
+}
+
 // Helper function to parse tier equivalent
 function parseTierEquivalent(tierInput) {
     // Remove T prefix if present and whitespace
@@ -60,17 +66,8 @@ module.exports = {
                 .setName('add')
                 .setDescription('Add gear to inventory')
                 .addStringOption(option =>
-                    option.setName('name')
-                        .setDescription('Gear name')
-                        .setRequired(true)
-                        .setAutocomplete(true))
-                .addStringOption(option =>
-                    option.setName('tier')
-                        .setDescription('Tier equivalent (e.g., T4.3, 4.3, T7)')
-                        .setRequired(true))
-                .addStringOption(option =>
                     option.setName('slot')
-                        .setDescription('Gear slot')
+                        .setDescription('Gear slot (select this first)')
                         .setRequired(true)
                         .addChoices(
                             { name: 'Head', value: 'head' },
@@ -79,10 +76,19 @@ module.exports = {
                             { name: 'Main-Hand', value: 'main-hand' },
                             { name: 'Off-Hand', value: 'off-hand' }
                         ))
+                .addStringOption(option =>
+                    option.setName('name')
+                        .setDescription('Gear name')
+                        .setRequired(true)
+                        .setAutocomplete(true))
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Tier equivalent (e.g., T4.3, 4.3, T7)')
+                        .setRequired(true))
                 .addIntegerOption(option =>
                     option.setName('quantity')
-                        .setDescription('Quantity to add (default: 1)')
-                        .setRequired(false))
+                        .setDescription('Quantity to add')
+                        .setRequired(true))
                 .addStringOption(option =>
                     option.setName('notes')
                         .setDescription('Optional notes')
@@ -106,6 +112,17 @@ module.exports = {
             subcommand
                 .setName('search')
                 .setDescription('Search for gear in inventory')
+                .addStringOption(option =>
+                    option.setName('slot')
+                        .setDescription('Filter by slot (select this first)')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: 'Head', value: 'head' },
+                            { name: 'Chest', value: 'chest' },
+                            { name: 'Shoes', value: 'shoes' },
+                            { name: 'Main-Hand', value: 'main-hand' },
+                            { name: 'Off-Hand', value: 'off-hand' }
+                        ))
                 .addStringOption(option =>
                     option.setName('name')
                         .setDescription('Gear name to search for')
@@ -166,10 +183,10 @@ module.exports = {
     },
 
     async handleAdd(interaction, db) {
+        const slot = interaction.options.getString('slot');
         const name = interaction.options.getString('name');
         const tierInput = interaction.options.getString('tier');
-        const slot = interaction.options.getString('slot');
-        const quantity = interaction.options.getInteger('quantity') || 1;
+        const quantity = interaction.options.getInteger('quantity');
         const notes = interaction.options.getString('notes') || '';
 
         // Parse tier equivalent
@@ -251,7 +268,7 @@ module.exports = {
         for (const [slot, items] of Object.entries(grouped)) {
             // Sort items by tier (lower first), then by name
             const sortedItems = sortItemsByTierAndName([...items]);
-            let slotText = `**${slot.charAt(0).toUpperCase() + slot.slice(1)}:**\n`;
+            let slotText = '';
             
             sortedItems.forEach(item => {
                 slotText += `• ${item.name} (${item.tierEquivalent}) - Qty: ${item.quantity}`;
@@ -266,14 +283,14 @@ module.exports = {
                 const chunks = slotText.match(/.{1,1000}/g) || [];
                 chunks.forEach((chunk, index) => {
                     fields.push({
-                        name: index === 0 ? slot.charAt(0).toUpperCase() + slot.slice(1) : '\u200B',
+                        name: index === 0 ? formatSlotName(slot) : '\u200B',
                         value: chunk,
                         inline: false
                     });
                 });
             } else {
                 fields.push({
-                    name: slot.charAt(0).toUpperCase() + slot.slice(1),
+                    name: formatSlotName(slot),
                     value: slotText,
                     inline: false
                 });
@@ -289,9 +306,10 @@ module.exports = {
     },
 
     async handleSearch(interaction, db) {
+        const slot = interaction.options.getString('slot');
         const searchName = interaction.options.getString('name');
 
-        const inventory = await db.getInventory(interaction.guildId, null, null, searchName);
+        const inventory = await db.getInventory(interaction.guildId, slot, null, searchName);
 
         if (inventory.length === 0) {
             const embed = new EmbedBuilder()
@@ -435,10 +453,13 @@ module.exports = {
                 return;
             }
 
-            // Get all inventory items
-            const inventory = await db.getInventory(interaction.guildId);
+            // Get the selected slot from options
+            const selectedSlot = interaction.options.getString('slot');
             
-            // Extract unique item names (case-insensitive)
+            // Get inventory items filtered by slot if slot is selected
+            const inventory = await db.getInventory(interaction.guildId, selectedSlot || null);
+            
+            // Extract unique item names (case-insensitive) from filtered inventory
             const uniqueNames = new Set();
             inventory.forEach(item => {
                 uniqueNames.add(item.name);
