@@ -25,15 +25,37 @@ function sortItemsByTierAndName(items) {
     });
 }
 
+// Helper function to format slot name for display (handles hyphens)
+function formatSlotName(slot) {
+    // Handle hyphenated slots like "main-hand" and "off-hand"
+    return slot.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('-');
+}
+
 // Helper function to parse selections from embed fields
 function parseSelectionsFromEmbed(embed) {
     const selections = {};
     
-    // Parse selected tier from description
-    if (embed && embed.description) {
-        const tierMatch = embed.description.match(/\*\*Selected Tier:\s*(.+?)\*\*/);
-        if (tierMatch) {
-            selections.selectedTier = tierMatch[1].trim();
+    // Check if we're on page 2 (gear selection) by checking title
+    if (embed && embed.title && embed.title.includes('Step 2')) {
+        selections.tierConfirmed = true;
+        
+        // Parse tier from description (format: "**Tier: T7**")
+        if (embed.description) {
+            const tierMatch = embed.description.match(/\*\*Tier:\s*(.+?)\*\*/);
+            if (tierMatch) {
+                selections.selectedTier = tierMatch[1].trim();
+            }
+        }
+    } else {
+        // On page 1 (tier selection)
+        selections.tierConfirmed = false;
+        
+        // Parse selected tier from description
+        if (embed && embed.description) {
+            const tierMatch = embed.description.match(/\*\*Selected Tier:\s*(.+?)\*\*/);
+            if (tierMatch) {
+                selections.selectedTier = tierMatch[1].trim();
+            }
         }
     }
     
@@ -119,14 +141,68 @@ module.exports = {
             return tierA - tierB;
         });
 
-        // Get selected tier (from currentSelections or need to select)
+        // Check if tier is confirmed (tierConfirmed indicates we're on page 2)
         const selectedTier = currentSelections.selectedTier;
+        const tierConfirmed = currentSelections.tierConfirmed || false;
 
-        // Filter inventory by selected tier if tier is selected
-        let filteredInventory = inventory;
-        if (selectedTier) {
-            filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
+        // PAGE 1: Tier Selection
+        if (!tierConfirmed) {
+            const tierSelectMenu = new StringSelectMenuBuilder()
+                .setCustomId('regear_tier')
+                .setPlaceholder(selectedTier ? `Selected: ${selectedTier}` : 'Select Tier First')
+                .setMinValues(0)
+                .setMaxValues(1);
+
+            sortedTiers.forEach(tier => {
+                tierSelectMenu.addOptions([
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel(tier)
+                        .setValue(tier)
+                        .setDefault(selectedTier === tier)
+                ]);
+            });
+
+            const embed = new EmbedBuilder()
+                .setColor('#0099FF')
+                .setTitle('🎒 Regear Request - Step 1: Select Tier')
+                .setDescription(selectedTier 
+                    ? `**Selected Tier: ${selectedTier}**\n\nClick **Confirm Tier** to proceed to gear selection.`
+                    : '**Step 1:** Select a tier from the dropdown below.\n**Step 2:** Click **Confirm Tier** to proceed.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            const rows = [
+                new ActionRowBuilder().addComponents(tierSelectMenu)
+            ];
+
+            // Add confirm/cancel buttons only if tier is selected
+            if (selectedTier) {
+                rows.push(
+                    new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId('regear_confirm_tier')
+                                .setLabel('✅ Confirm Tier')
+                                .setStyle(ButtonStyle.Success),
+                            new ButtonBuilder()
+                                .setCustomId('regear_cancel')
+                                .setLabel('❌ Cancel')
+                                .setStyle(ButtonStyle.Danger)
+                        )
+                );
+            }
+
+            if (interaction.replied || interaction.deferred) {
+                await interaction.editReply({ embeds: [embed], components: rows });
+            } else {
+                await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+            }
+            return;
         }
+
+        // PAGE 2: Gear Selection (tier is confirmed)
+        // Filter inventory by confirmed tier
+        const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
 
         // Group inventory by slot (filtered by tier)
         const inventoryBySlot = {};
@@ -134,56 +210,19 @@ module.exports = {
             inventoryBySlot[slot] = filteredInventory.filter(item => item.slot === slot);
         });
 
-        // Create rows
-        const rows = [];
-
-        // Add tier selection dropdown first
-        const tierSelectMenu = new StringSelectMenuBuilder()
-            .setCustomId('regear_tier')
-            .setPlaceholder(selectedTier ? `Selected: ${selectedTier}` : 'Select Tier First')
-            .setMinValues(0)
-            .setMaxValues(1);
-
-        sortedTiers.forEach(tier => {
-            tierSelectMenu.addOptions([
-                new StringSelectMenuOptionBuilder()
-                    .setLabel(tier)
-                    .setValue(tier)
-                    .setDefault(selectedTier === tier)
-            ]);
-        });
-
-        rows.push(new ActionRowBuilder().addComponents(tierSelectMenu));
-
-        // Create dropdowns for each slot (only if tier is selected)
-        if (!selectedTier) {
-            // Disable all slot dropdowns if no tier selected
-            for (const slot of VALID_SLOTS) {
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`regear_${slot}`)
-                    .setPlaceholder(`${slot.charAt(0).toUpperCase() + slot.slice(1)} - Select tier first`)
-                    .setDisabled(true)
-                    .addOptions([
-                        new StringSelectMenuOptionBuilder()
-                            .setLabel('Select tier first')
-                            .setValue('none')
-                            .setDescription('Please select a tier above')
-                    ]);
-                
-                rows.push(new ActionRowBuilder().addComponents(selectMenu));
-            }
-        } else {
-            // Create enabled dropdowns with filtered items
-            for (const slot of VALID_SLOTS) {
+        // Helper function to create a dropdown for a slot
+        const createSlotDropdown = (slot) => {
             // Sort items by tier (lower first), then by name
             let slotItems = inventoryBySlot[slot];
             slotItems = sortItemsByTierAndName([...slotItems]);
             
+            const selectMenu = new StringSelectMenuBuilder()
+                .setCustomId(`regear_${slot}`);
+            
             if (slotItems.length === 0) {
-                // Create disabled dropdown if no items
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`regear_${slot}`)
-                    .setPlaceholder(`${slot.charAt(0).toUpperCase() + slot.slice(1)} - No items available`)
+                // Disabled if no items available
+                selectMenu
+                    .setPlaceholder(`${formatSlotName(slot)} - No items available`)
                     .setDisabled(true)
                     .addOptions([
                         new StringSelectMenuOptionBuilder()
@@ -191,13 +230,10 @@ module.exports = {
                             .setValue('none')
                             .setDescription('No items in this slot')
                     ]);
-                
-                rows.push(new ActionRowBuilder().addComponents(selectMenu));
             } else {
-                // Create enabled dropdown with items
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`regear_${slot}`)
-                    .setPlaceholder(`Select ${slot.charAt(0).toUpperCase() + slot.slice(1)} gear`)
+                // Enabled dropdown with items
+                selectMenu
+                    .setPlaceholder(`Select ${formatSlotName(slot)} gear`)
                     .setMinValues(0)
                     .setMaxValues(1);
                 
@@ -208,7 +244,7 @@ module.exports = {
                 // Check if this slot already has a selection
                 const currentSelection = currentSelections[slot];
                 
-                // Add options for each item (format: name|tierEquivalent|slot for value)
+                // Add options for each item
                 slotItems.forEach(item => {
                     const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
                     
@@ -239,11 +275,23 @@ module.exports = {
                 if (options.length > 0) {
                     selectMenu.addOptions(options);
                 }
-                
-                rows.push(new ActionRowBuilder().addComponents(selectMenu));
             }
-            }
-        }
+            
+            return selectMenu;
+        };
+
+        // Group slot dropdowns (5 slots = 5 dropdowns, need to fit in remaining rows)
+        // Row 1: Head, Chest (2 dropdowns)
+        // Row 2: Shoes, Main-Hand, Off-Hand (3 dropdowns)
+        const rows = [];
+        
+        const headChestRow = new ActionRowBuilder()
+            .addComponents(createSlotDropdown('head'), createSlotDropdown('chest'));
+        rows.push(headChestRow);
+        
+        const shoesMainhandOffhandRow = new ActionRowBuilder()
+            .addComponents(createSlotDropdown('shoes'), createSlotDropdown('main-hand'), createSlotDropdown('off-hand'));
+        rows.push(shoesMainhandOffhandRow);
 
         // Build selected items display
         let selectedItemsText = '';
@@ -251,7 +299,7 @@ module.exports = {
         for (const slot of VALID_SLOTS) {
             if (currentSelections[slot]) {
                 const sel = currentSelections[slot];
-                selectedItemsText += `• **${slot.charAt(0).toUpperCase() + slot.slice(1)}:** ${sel.name} (${sel.tierEquivalent})\n`;
+                selectedItemsText += `• **${formatSlotName(slot)}:** ${sel.name} (${sel.tierEquivalent})\n`;
                 hasSelections = true;
             }
         }
@@ -262,31 +310,27 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setColor('#0099FF')
-            .setTitle('🎒 Regear Request')
-            .setDescription(selectedTier 
-                ? `**Selected Tier: ${selectedTier}**\n\nSelect the gear items you need from the dropdowns below.\nSelect one item per slot, then click **Confirm** to complete your request.`
-                : '**Step 1:** Select a tier from the dropdown above.\n**Step 2:** Then select gear items for each slot.\n**Step 3:** Click **Confirm** to complete your request.')
+            .setTitle('🎒 Regear Request - Step 2: Select Gear')
+            .setDescription(`**Tier: ${selectedTier}**\n\nSelect the gear items you need from the dropdowns below.\nSelect one item per slot, then click **Confirm Regear** to complete your request.`)
             .addFields(
                 { name: 'Selected Items', value: selectedItemsText, inline: false }
             )
             .setFooter({ text: 'Phoenix Assistance Bot' })
             .setTimestamp();
 
-        // Add confirm/cancel buttons only if there are selections
-        if (hasSelections) {
-            const confirmRow = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId('regear_confirm')
-                        .setLabel('✅ Confirm Regear')
-                        .setStyle(ButtonStyle.Success),
-                    new ButtonBuilder()
-                        .setCustomId('regear_cancel')
-                        .setLabel('❌ Cancel')
-                        .setStyle(ButtonStyle.Danger)
-                );
-            rows.push(confirmRow);
-        }
+        // Add confirm/cancel buttons
+        const confirmRow = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('regear_confirm')
+                    .setLabel('✅ Confirm Regear')
+                    .setStyle(ButtonStyle.Success),
+                new ButtonBuilder()
+                    .setCustomId('regear_cancel')
+                    .setLabel('❌ Cancel')
+                    .setStyle(ButtonStyle.Danger)
+            );
+        rows.push(confirmRow);
 
         if (interaction.replied || interaction.deferred) {
             await interaction.editReply({ embeds: [embed], components: rows });
@@ -309,23 +353,16 @@ module.exports = {
         const currentEmbed = interaction.message.embeds[0];
         let currentSelections = parseSelectionsFromEmbed(currentEmbed);
 
-        // Handle tier selection
+        // Handle tier selection (only on page 1)
         if (customId === 'regear_tier') {
             if (interaction.values.length === 0 || interaction.values[0] === 'none') {
-                // Clear tier selection and all slot selections
+                // Clear tier selection
                 delete currentSelections.selectedTier;
-                // Clear all slot selections when tier changes
-                VALID_SLOTS.forEach(slot => delete currentSelections[slot]);
+                delete currentSelections.tierConfirmed;
             } else {
                 const selectedTier = interaction.values[0];
-                const oldTier = currentSelections.selectedTier;
-                
-                // If tier changed, clear all slot selections
-                if (oldTier && oldTier !== selectedTier) {
-                    VALID_SLOTS.forEach(slot => delete currentSelections[slot]);
-                }
-                
                 currentSelections.selectedTier = selectedTier;
+                // Don't set tierConfirmed here - wait for confirm button
             }
         } else {
             // Handle slot selection
@@ -362,7 +399,25 @@ module.exports = {
     async handleButtonInteraction(interaction, db) {
         const customId = interaction.customId;
         
-        if (customId === 'regear_confirm') {
+        if (customId === 'regear_confirm_tier') {
+            // Get current selections from the embed
+            const currentEmbed = interaction.message.embeds[0];
+            const selections = parseSelectionsFromEmbed(currentEmbed);
+
+            if (!selections.selectedTier) {
+                await interaction.reply({ content: 'Please select a tier first.', ephemeral: true });
+                return true;
+            }
+
+            await interaction.deferUpdate();
+
+            // Mark tier as confirmed and proceed to page 2
+            selections.tierConfirmed = true;
+            
+            // Show gear selection page
+            await this.showRegearMenu(interaction, db, selections);
+            return true;
+        } else if (customId === 'regear_confirm') {
             // Get current selections from the embed
             const currentEmbed = interaction.message.embeds[0];
             const selections = parseSelectionsFromEmbed(currentEmbed);
@@ -437,7 +492,7 @@ module.exports = {
         } else if (customId === 'regear_cancel') {
             await interaction.deferUpdate();
             
-            // Reset to initial state
+            // Reset to initial state (page 1)
             await this.showRegearMenu(interaction, db, {});
             return true;
         }
