@@ -1,5 +1,27 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 
+// Helper function to extract tier number for sorting (e.g., "T7" -> 7, "T8" -> 8)
+function getTierNumber(tierEquivalent) {
+    const match = tierEquivalent.match(/^T?(\d+)$/i);
+    return match ? parseInt(match[1], 10) : 999; // Return 999 for invalid tiers so they sort last
+}
+
+// Helper function to sort items by tier (lower first), then by name
+function sortItemsByTierAndName(items) {
+    return items.sort((a, b) => {
+        const tierA = getTierNumber(a.tierEquivalent);
+        const tierB = getTierNumber(b.tierEquivalent);
+        
+        // First sort by tier (lower tiers first)
+        if (tierA !== tierB) {
+            return tierA - tierB;
+        }
+        
+        // If same tier, sort by name alphabetically
+        return a.name.localeCompare(b.name);
+    });
+}
+
 // Helper function to parse tier equivalent
 function parseTierEquivalent(tierInput) {
     // Remove T prefix if present and whitespace
@@ -227,9 +249,11 @@ module.exports = {
         // Discord embed fields have a limit, so we'll format efficiently
         let fields = [];
         for (const [slot, items] of Object.entries(grouped)) {
+            // Sort items by tier (lower first), then by name
+            const sortedItems = sortItemsByTierAndName([...items]);
             let slotText = `**${slot.charAt(0).toUpperCase() + slot.slice(1)}:**\n`;
             
-            items.forEach(item => {
+            sortedItems.forEach(item => {
                 slotText += `• ${item.name} (${item.tierEquivalent}) - Qty: ${item.quantity}`;
                 if (item.notes) {
                     slotText += ` - ${item.notes}`;
@@ -280,6 +304,9 @@ module.exports = {
             return interaction.reply({ embeds: [embed] });
         }
 
+        // Sort items by tier (lower first), then by name
+        const sortedInventory = sortItemsByTierAndName([...inventory]);
+
         const embed = new EmbedBuilder()
             .setColor('#0099FF')
             .setTitle('🔍 Search Results')
@@ -288,7 +315,7 @@ module.exports = {
             .setTimestamp();
 
         let fields = [];
-        inventory.forEach(item => {
+        sortedInventory.forEach(item => {
             fields.push({
                 name: `${item.name} (${item.tierEquivalent})`,
                 value: `Slot: ${item.slot.charAt(0).toUpperCase() + item.slot.slice(1)}\nQuantity: ${item.quantity}${item.notes ? `\nNotes: ${item.notes}` : ''}`,

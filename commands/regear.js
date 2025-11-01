@@ -3,6 +3,28 @@ const { parseTierEquivalent } = require('./inventory.js');
 
 const VALID_SLOTS = ['head', 'chest', 'shoes', 'main-hand', 'off-hand'];
 
+// Helper function to extract tier number for sorting (e.g., "T7" -> 7, "T8" -> 8)
+function getTierNumber(tierEquivalent) {
+    const match = tierEquivalent.match(/^T?(\d+)$/i);
+    return match ? parseInt(match[1], 10) : 999; // Return 999 for invalid tiers so they sort last
+}
+
+// Helper function to sort items by tier (lower first), then by name
+function sortItemsByTierAndName(items) {
+    return items.sort((a, b) => {
+        const tierA = getTierNumber(a.tierEquivalent);
+        const tierB = getTierNumber(b.tierEquivalent);
+        
+        // First sort by tier (lower tiers first)
+        if (tierA !== tierB) {
+            return tierA - tierB;
+        }
+        
+        // If same tier, sort by name alphabetically
+        return a.name.localeCompare(b.name);
+    });
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('regear')
@@ -65,7 +87,9 @@ module.exports = {
         const rows = [];
         
         for (const slot of VALID_SLOTS) {
-            const slotItems = inventoryBySlot[slot];
+            // Sort items by tier (lower first), then by name
+            let slotItems = inventoryBySlot[slot];
+            slotItems = sortItemsByTierAndName([...slotItems]);
             
             if (slotItems.length === 0) {
                 // Create disabled dropdown if no items
@@ -192,7 +216,9 @@ module.exports = {
         const rows = [];
         
         for (const s of VALID_SLOTS) {
-            const slotItems = inventoryBySlot[s];
+            // Sort items by tier (lower first), then by name
+            let slotItems = inventoryBySlot[s];
+            slotItems = sortItemsByTierAndName([...slotItems]);
             
             if (slotItems.length === 0) {
                 const selectMenu = new StringSelectMenuBuilder()
