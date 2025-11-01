@@ -35,34 +35,32 @@ function formatSlotName(slot) {
 function parseSelectionsFromEmbed(embed) {
     const selections = {};
     
-    // Check if we're on page 2 (gear selection) by checking title
-    if (embed && embed.title && embed.title.includes('Step 2')) {
-        selections.tierConfirmed = true;
-        
-        // Parse tier from description (format: "**Tier: T7**")
-        if (embed.description) {
-            const tierMatch = embed.description.match(/\*\*Tier:\s*(.+?)\*\*/);
-            if (tierMatch) {
-                selections.selectedTier = tierMatch[1].trim();
-            }
-        }
-    } else {
-        // On page 1 (tier selection)
-        selections.tierConfirmed = false;
-        
-        // Parse selected tier from description
-        if (embed && embed.description) {
-            const tierMatch = embed.description.match(/\*\*Selected Tier:\s*(.+?)\*\*/);
-            if (tierMatch) {
-                selections.selectedTier = tierMatch[1].trim();
-            }
+    // Determine current page from title
+    if (embed && embed.title) {
+        if (embed.title.includes('Step 1')) {
+            selections.currentPage = 1;
+        } else if (embed.title.includes('Step 2')) {
+            selections.currentPage = 2;
+            selections.tierConfirmed = true;
+        } else if (embed.title.includes('Step 3')) {
+            selections.currentPage = 3;
+            selections.tierConfirmed = true;
         }
     }
     
-    // Parse slot selections from fields
+    // Parse tier from description
+    if (embed && embed.description) {
+        const tierMatch = embed.description.match(/\*\*Tier:\s*(.+?)\*\*/) || 
+                         embed.description.match(/\*\*Selected Tier:\s*(.+?)\*\*/);
+        if (tierMatch) {
+            selections.selectedTier = tierMatch[1].trim();
+        }
+    }
+    
+    // Parse slot selections from fields (for summary on page 3 or selections on page 2)
     if (embed && embed.fields && embed.fields.length > 0) {
         // Look for "Selected Items" field
-        const selectedField = embed.fields.find(field => field.name === 'Selected Items');
+        const selectedField = embed.fields.find(field => field.name === 'Selected Items' || field.name === 'Summary');
         if (selectedField && selectedField.value) {
             // Parse format: "• **Head:** ItemName (Tier)"
             const lines = selectedField.value.split('\n');
@@ -70,7 +68,12 @@ function parseSelectionsFromEmbed(embed) {
                 const match = line.match(/^•\s*\*\*(.+?):\*\*\s*(.+?)\s*\((.+?)\)$/);
                 if (match) {
                     const [, slot, name, tier] = match;
-                    selections[slot.toLowerCase()] = { name: name.trim(), tierEquivalent: tier.trim(), slot: slot.toLowerCase() };
+                    const slotLower = slot.toLowerCase();
+                    selections[slotLower] = { 
+                        name: name.trim(), 
+                        tierEquivalent: tier.trim(), 
+                        slot: slotLower 
+                    };
                 }
             });
         }
@@ -130,23 +133,23 @@ module.exports = {
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
 
-        // Get all unique tiers from inventory
-        const uniqueTiers = new Set();
-        inventory.forEach(item => {
-            uniqueTiers.add(item.tierEquivalent);
-        });
-        const sortedTiers = Array.from(uniqueTiers).sort((a, b) => {
-            const tierA = getTierNumber(a);
-            const tierB = getTierNumber(b);
-            return tierA - tierB;
-        });
-
-        // Check if tier is confirmed (tierConfirmed indicates we're on page 2)
+        // Determine current page (default to 1 if not set)
+        const currentPage = currentSelections.currentPage || 1;
         const selectedTier = currentSelections.selectedTier;
-        const tierConfirmed = currentSelections.tierConfirmed || false;
 
         // PAGE 1: Tier Selection
-        if (!tierConfirmed) {
+        if (currentPage === 1) {
+            // Get all unique tiers from inventory
+            const uniqueTiers = new Set();
+            inventory.forEach(item => {
+                uniqueTiers.add(item.tierEquivalent);
+            });
+            const sortedTiers = Array.from(uniqueTiers).sort((a, b) => {
+                const tierA = getTierNumber(a);
+                const tierB = getTierNumber(b);
+                return tierA - tierB;
+            });
+
             const tierSelectMenu = new StringSelectMenuBuilder()
                 .setCustomId('regear_tier')
                 .setPlaceholder(selectedTier ? `Selected: ${selectedTier}` : 'Select Tier First')
@@ -166,8 +169,8 @@ module.exports = {
                 .setColor('#0099FF')
                 .setTitle('🎒 Regear Request - Step 1: Select Tier')
                 .setDescription(selectedTier 
-                    ? `**Selected Tier: ${selectedTier}**\n\nClick **Confirm Tier** to proceed to gear selection.`
-                    : '**Step 1:** Select a tier from the dropdown below.\n**Step 2:** Click **Confirm Tier** to proceed.')
+                    ? `**Selected Tier: ${selectedTier}**\n\nClick **Next** to proceed to gear selection.`
+                    : 'Select a tier from the dropdown below, then click **Next** to continue.')
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
@@ -175,22 +178,23 @@ module.exports = {
                 new ActionRowBuilder().addComponents(tierSelectMenu)
             ];
 
-            // Add confirm/cancel buttons only if tier is selected
+            // Add navigation buttons
+            const navButtons = new ActionRowBuilder();
             if (selectedTier) {
-                rows.push(
-                    new ActionRowBuilder()
-                        .addComponents(
-                            new ButtonBuilder()
-                                .setCustomId('regear_confirm_tier')
-                                .setLabel('✅ Confirm Tier')
-                                .setStyle(ButtonStyle.Success),
-                            new ButtonBuilder()
-                                .setCustomId('regear_cancel')
-                                .setLabel('❌ Cancel')
-                                .setStyle(ButtonStyle.Danger)
-                        )
+                navButtons.addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('regear_next')
+                        .setLabel('Next ▶️')
+                        .setStyle(ButtonStyle.Primary)
                 );
             }
+            navButtons.addComponents(
+                new ButtonBuilder()
+                    .setCustomId('regear_cancel')
+                    .setLabel('❌ Cancel')
+                    .setStyle(ButtonStyle.Danger)
+            );
+            rows.push(navButtons);
 
             if (interaction.replied || interaction.deferred) {
                 await interaction.editReply({ embeds: [embed], components: rows });
@@ -200,142 +204,222 @@ module.exports = {
             return;
         }
 
-        // PAGE 2: Gear Selection (tier is confirmed)
-        // Filter inventory by confirmed tier
-        const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
+        // PAGE 2: Head, Chest, Shoes Selection
+        if (currentPage === 2) {
+            // Filter inventory by selected tier
+            const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
 
-        // Group inventory by slot (filtered by tier)
-        const inventoryBySlot = {};
-        VALID_SLOTS.forEach(slot => {
-            inventoryBySlot[slot] = filteredInventory.filter(item => item.slot === slot);
-        });
+            // Helper function to create a dropdown for a slot
+            const createSlotDropdown = (slot) => {
+                const slotItems = filteredInventory.filter(item => item.slot === slot);
+                const sortedItems = sortItemsByTierAndName([...slotItems]);
+                
+                const selectMenu = new StringSelectMenuBuilder()
+                    .setCustomId(`regear_${slot}`);
+                
+                if (sortedItems.length === 0) {
+                    selectMenu
+                        .setPlaceholder(`${formatSlotName(slot)} - No items available`)
+                        .setDisabled(true)
+                        .addOptions([
+                            new StringSelectMenuOptionBuilder()
+                                .setLabel('No items available')
+                                .setValue('none')
+                        ]);
+                } else {
+                    selectMenu
+                        .setPlaceholder(`Select ${formatSlotName(slot)}`)
+                        .setMinValues(0)
+                        .setMaxValues(1);
+                    
+                    const seenValues = new Set();
+                    const currentSelection = currentSelections[slot];
+                    
+                    sortedItems.forEach(item => {
+                        const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
+                        if (seenValues.has(value)) return;
+                        seenValues.add(value);
+                        
+                        const label = `${item.name} (${item.tierEquivalent})`;
+                        const description = `Qty: ${item.quantity}${item.notes ? ` | ${item.notes}` : ''}`;
+                        
+                        const option = new StringSelectMenuOptionBuilder()
+                            .setLabel(label.length > 100 ? label.substring(0, 97) + '...' : label)
+                            .setDescription(description.length > 100 ? description.substring(0, 97) + '...' : description)
+                            .setValue(value);
+                        
+                        if (currentSelection && currentSelection.name === item.name && currentSelection.tierEquivalent === item.tierEquivalent) {
+                            option.setDefault(true);
+                        }
+                        
+                        selectMenu.addOptions([option]);
+                    });
+                }
+                
+                return selectMenu;
+            };
 
-        // Helper function to create a dropdown for a slot
-        const createSlotDropdown = (slot) => {
-            // Sort items by tier (lower first), then by name
-            let slotItems = inventoryBySlot[slot];
-            slotItems = sortItemsByTierAndName([...slotItems]);
-            
-            const selectMenu = new StringSelectMenuBuilder()
-                .setCustomId(`regear_${slot}`);
-            
-            if (slotItems.length === 0) {
-                // Disabled if no items available
-                selectMenu
-                    .setPlaceholder(`${formatSlotName(slot)} - No items available`)
-                    .setDisabled(true)
-                    .addOptions([
-                        new StringSelectMenuOptionBuilder()
-                            .setLabel('No items available')
-                            .setValue('none')
-                            .setDescription('No items in this slot')
-                    ]);
-            } else {
-                // Enabled dropdown with items
-                selectMenu
-                    .setPlaceholder(`Select ${formatSlotName(slot)} gear`)
-                    .setMinValues(0)
-                    .setMaxValues(1);
-                
-                // Track seen values to prevent duplicates
-                const seenValues = new Set();
-                const options = [];
-                
-                // Check if this slot already has a selection
-                const currentSelection = currentSelections[slot];
-                
-                // Add options for each item
-                slotItems.forEach(item => {
-                    const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
-                    
-                    // Skip if we've already seen this exact value
-                    if (seenValues.has(value)) {
-                        return;
-                    }
-                    
-                    seenValues.add(value);
-                    
-                    const label = `${item.name} (${item.tierEquivalent})`;
-                    const description = `Qty: ${item.quantity}${item.notes ? ` | ${item.notes}` : ''}`;
-                    
-                    const option = new StringSelectMenuOptionBuilder()
-                        .setLabel(label.length > 100 ? label.substring(0, 97) + '...' : label)
-                        .setDescription(description.length > 100 ? description.substring(0, 97) + '...' : description)
-                        .setValue(value);
-                    
-                    // Mark as default if this is the current selection
-                    if (currentSelection && currentSelection.name === item.name && currentSelection.tierEquivalent === item.tierEquivalent) {
-                        option.setDefault(true);
-                    }
-                    
-                    options.push(option);
-                });
-                
-                // Add all options at once
-                if (options.length > 0) {
-                    selectMenu.addOptions(options);
+            // Build page 2 rows: Head, Chest, Shoes in separate rows
+            const rows = [
+                new ActionRowBuilder().addComponents(createSlotDropdown('head')),
+                new ActionRowBuilder().addComponents(createSlotDropdown('chest')),
+                new ActionRowBuilder().addComponents(createSlotDropdown('shoes'))
+            ];
+
+            // Build selected items display for page 2 slots
+            const page2Slots = ['head', 'chest', 'shoes'];
+            let selectedItemsText = '';
+            for (const slot of page2Slots) {
+                if (currentSelections[slot]) {
+                    const sel = currentSelections[slot];
+                    selectedItemsText += `• **${formatSlotName(slot)}:** ${sel.name} (${sel.tierEquivalent})\n`;
                 }
             }
-            
-            return selectMenu;
-        };
-
-        // Group slot dropdowns (5 slots = 5 dropdowns, need to fit in remaining rows)
-        // Row 1: Head, Chest (2 dropdowns)
-        // Row 2: Shoes, Main-Hand, Off-Hand (3 dropdowns)
-        const rows = [];
-        
-        const headChestRow = new ActionRowBuilder()
-            .addComponents(createSlotDropdown('head'), createSlotDropdown('chest'));
-        rows.push(headChestRow);
-        
-        const shoesMainhandOffhandRow = new ActionRowBuilder()
-            .addComponents(createSlotDropdown('shoes'), createSlotDropdown('main-hand'), createSlotDropdown('off-hand'));
-        rows.push(shoesMainhandOffhandRow);
-
-        // Build selected items display
-        let selectedItemsText = '';
-        let hasSelections = false;
-        for (const slot of VALID_SLOTS) {
-            if (currentSelections[slot]) {
-                const sel = currentSelections[slot];
-                selectedItemsText += `• **${formatSlotName(slot)}:** ${sel.name} (${sel.tierEquivalent})\n`;
-                hasSelections = true;
+            if (!selectedItemsText) {
+                selectedItemsText = 'No items selected yet.';
             }
+
+            const embed = new EmbedBuilder()
+                .setColor('#0099FF')
+                .setTitle('🎒 Regear Request - Step 2: Select Head, Chest, Shoes')
+                .setDescription(`**Tier: ${selectedTier}**\n\nSelect gear for Head, Chest, and Shoes.`)
+                .addFields({ name: 'Selected Items', value: selectedItemsText, inline: false })
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            // Navigation buttons
+            const navButtons = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('regear_back')
+                        .setLabel('◀️ Back')
+                        .setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder()
+                        .setCustomId('regear_next')
+                        .setLabel('Next ▶️')
+                        .setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder()
+                        .setCustomId('regear_cancel')
+                        .setLabel('❌ Cancel')
+                        .setStyle(ButtonStyle.Danger)
+                );
+            rows.push(navButtons);
+
+            if (interaction.replied || interaction.deferred) {
+                await interaction.editReply({ embeds: [embed], components: rows });
+            } else {
+                await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+            }
+            return;
         }
 
-        if (!hasSelections) {
-            selectedItemsText = 'No items selected yet.';
-        }
+        // PAGE 3: Main-Hand, Off-Hand Selection + Summary
+        if (currentPage === 3) {
+            // Filter inventory by selected tier
+            const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
 
-        const embed = new EmbedBuilder()
-            .setColor('#0099FF')
-            .setTitle('🎒 Regear Request - Step 2: Select Gear')
-            .setDescription(`**Tier: ${selectedTier}**\n\nSelect the gear items you need from the dropdowns below.\nSelect one item per slot, then click **Confirm Regear** to complete your request.`)
-            .addFields(
-                { name: 'Selected Items', value: selectedItemsText, inline: false }
-            )
-            .setFooter({ text: 'Phoenix Assistance Bot' })
-            .setTimestamp();
+            // Helper function to create a dropdown for a slot
+            const createSlotDropdown = (slot) => {
+                const slotItems = filteredInventory.filter(item => item.slot === slot);
+                const sortedItems = sortItemsByTierAndName([...slotItems]);
+                
+                const selectMenu = new StringSelectMenuBuilder()
+                    .setCustomId(`regear_${slot}`);
+                
+                if (sortedItems.length === 0) {
+                    selectMenu
+                        .setPlaceholder(`${formatSlotName(slot)} - No items available`)
+                        .setDisabled(true)
+                        .addOptions([
+                            new StringSelectMenuOptionBuilder()
+                                .setLabel('No items available')
+                                .setValue('none')
+                        ]);
+                } else {
+                    selectMenu
+                        .setPlaceholder(`Select ${formatSlotName(slot)}`)
+                        .setMinValues(0)
+                        .setMaxValues(1);
+                    
+                    const seenValues = new Set();
+                    const currentSelection = currentSelections[slot];
+                    
+                    sortedItems.forEach(item => {
+                        const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
+                        if (seenValues.has(value)) return;
+                        seenValues.add(value);
+                        
+                        const label = `${item.name} (${item.tierEquivalent})`;
+                        const description = `Qty: ${item.quantity}${item.notes ? ` | ${item.notes}` : ''}`;
+                        
+                        const option = new StringSelectMenuOptionBuilder()
+                            .setLabel(label.length > 100 ? label.substring(0, 97) + '...' : label)
+                            .setDescription(description.length > 100 ? description.substring(0, 97) + '...' : description)
+                            .setValue(value);
+                        
+                        if (currentSelection && currentSelection.name === item.name && currentSelection.tierEquivalent === item.tierEquivalent) {
+                            option.setDefault(true);
+                        }
+                        
+                        selectMenu.addOptions([option]);
+                    });
+                }
+                
+                return selectMenu;
+            };
 
-        // Add confirm/cancel buttons
-        const confirmRow = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('regear_confirm')
-                    .setLabel('✅ Confirm Regear')
-                    .setStyle(ButtonStyle.Success),
-                new ButtonBuilder()
-                    .setCustomId('regear_cancel')
-                    .setLabel('❌ Cancel')
-                    .setStyle(ButtonStyle.Danger)
-            );
-        rows.push(confirmRow);
+            // Build page 3 rows: Main-Hand, Off-Hand
+            const rows = [
+                new ActionRowBuilder().addComponents(createSlotDropdown('main-hand')),
+                new ActionRowBuilder().addComponents(createSlotDropdown('off-hand'))
+            ];
 
-        if (interaction.replied || interaction.deferred) {
-            await interaction.editReply({ embeds: [embed], components: rows });
-        } else {
-            await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+            // Build summary of ALL selected items
+            let summaryText = '';
+            let hasAnySelection = false;
+            for (const slot of VALID_SLOTS) {
+                if (currentSelections[slot]) {
+                    const sel = currentSelections[slot];
+                    summaryText += `• **${formatSlotName(slot)}:** ${sel.name} (${sel.tierEquivalent})\n`;
+                    hasAnySelection = true;
+                }
+            }
+            if (!hasAnySelection) {
+                summaryText = 'No items selected yet.';
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor('#0099FF')
+                .setTitle('🎒 Regear Request - Step 3: Select Main-Hand, Off-Hand & Confirm')
+                .setDescription(`**Tier: ${selectedTier}**\n\nSelect Main-Hand and Off-Hand gear, then review your selections below and click **Confirm** to finalize.`)
+                .addFields({ name: 'Summary', value: summaryText, inline: false })
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            // Navigation buttons
+            const navButtons = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId('regear_back')
+                        .setLabel('◀️ Back')
+                        .setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder()
+                        .setCustomId('regear_confirm')
+                        .setLabel('✅ Confirm Regear')
+                        .setStyle(ButtonStyle.Success),
+                    new ButtonBuilder()
+                        .setCustomId('regear_cancel')
+                        .setLabel('❌ Cancel')
+                        .setStyle(ButtonStyle.Danger)
+                );
+            rows.push(navButtons);
+
+            if (interaction.replied || interaction.deferred) {
+                await interaction.editReply({ embeds: [embed], components: rows });
+            } else {
+                await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+            }
+            return;
         }
     },
 
@@ -399,45 +483,72 @@ module.exports = {
     async handleButtonInteraction(interaction, db) {
         const customId = interaction.customId;
         
-        if (customId === 'regear_confirm_tier') {
-            // Get current selections from the embed
-            const currentEmbed = interaction.message.embeds[0];
-            const selections = parseSelectionsFromEmbed(currentEmbed);
+        // Get current selections from the embed
+        const currentEmbed = interaction.message.embeds[0];
+        const selections = parseSelectionsFromEmbed(currentEmbed);
 
-            if (!selections.selectedTier) {
-                await interaction.reply({ content: 'Please select a tier first.', ephemeral: true });
-                return true;
-            }
-
+        if (customId === 'regear_next') {
             await interaction.deferUpdate();
 
-            // Mark tier as confirmed and proceed to page 2
-            selections.tierConfirmed = true;
-            
-            // Show gear selection page
+            // Navigate to next page
+            if (selections.currentPage === 1) {
+                // Page 1 -> Page 2: Need tier selected
+                if (!selections.selectedTier) {
+                    await interaction.followUp({ content: 'Please select a tier first.', ephemeral: true });
+                    return true;
+                }
+                selections.currentPage = 2;
+                selections.tierConfirmed = true;
+            } else if (selections.currentPage === 2) {
+                // Page 2 -> Page 3
+                selections.currentPage = 3;
+            }
+
+            await this.showRegearMenu(interaction, db, selections);
+            return true;
+        } else if (customId === 'regear_back') {
+            await interaction.deferUpdate();
+
+            // Navigate to previous page
+            if (selections.currentPage === 3) {
+                selections.currentPage = 2;
+            } else if (selections.currentPage === 2) {
+                selections.currentPage = 1;
+                // Keep tier selected but go back
+            }
+
             await this.showRegearMenu(interaction, db, selections);
             return true;
         } else if (customId === 'regear_confirm') {
-            // Get current selections from the embed
-            const currentEmbed = interaction.message.embeds[0];
-            const selections = parseSelectionsFromEmbed(currentEmbed);
+            // Only allow confirm on page 3
+            if (selections.currentPage !== 3) {
+                await interaction.reply({ content: 'Please complete all steps before confirming.', ephemeral: true });
+                return true;
+            }
 
-            if (Object.keys(selections).length === 0) {
+            // Check if any items are selected
+            let hasSelections = false;
+            for (const slot of VALID_SLOTS) {
+                if (selections[slot]) {
+                    hasSelections = true;
+                    break;
+                }
+            }
+
+            if (!hasSelections) {
                 await interaction.reply({ content: 'No items selected to confirm.', ephemeral: true });
                 return true;
             }
 
             await interaction.deferUpdate();
 
-            // Process each selection (skip selectedTier, only process slot selections)
+            // Process each selection (skip non-slot properties)
             const results = [];
             const errors = [];
 
-            for (const [slot, selection] of Object.entries(selections)) {
-                // Skip selectedTier, only process actual slot selections
-                if (slot === 'selectedTier') {
-                    continue;
-                }
+            for (const slot of VALID_SLOTS) {
+                const selection = selections[slot];
+                if (!selection) continue;
                 
                 const result = await db.removeGearFromInventory(
                     interaction.guildId,
@@ -468,14 +579,14 @@ module.exports = {
             if (results.length > 0) {
                 resultText += '**✅ Successfully Issued:**\n';
                 results.forEach(r => {
-                    resultText += `• **${r.slot.charAt(0).toUpperCase() + r.slot.slice(1)}:** ${r.name} (${r.tierEquivalent}) - Remaining: ${r.remainingQuantity}\n`;
+                    resultText += `• **${formatSlotName(r.slot)}:** ${r.name} (${r.tierEquivalent}) - Remaining: ${r.remainingQuantity}\n`;
                 });
             }
 
             if (errors.length > 0) {
                 resultText += '\n**❌ Errors:**\n';
                 errors.forEach(e => {
-                    resultText += `• **${e.slot.charAt(0).toUpperCase() + e.slot.slice(1)}:** ${e.name} - ${e.error}\n`;
+                    resultText += `• **${formatSlotName(e.slot)}:** ${e.name} - ${e.error}\n`;
                 });
             }
 
