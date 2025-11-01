@@ -697,8 +697,11 @@ module.exports = {
                 await this.logRegearToChannel(interaction, db, selections, results);
             }
 
-            // Clear all components
-            await interaction.editReply({ embeds: [embed], components: [] });
+            // Clear all components from the original message
+            await interaction.editReply({ embeds: [], components: [] });
+            
+            // Send final confirmation as a public follow-up message
+            await interaction.followUp({ embeds: [embed], ephemeral: false });
             return true;
         } else if (customId === 'regear_cancel') {
             await interaction.deferUpdate();
