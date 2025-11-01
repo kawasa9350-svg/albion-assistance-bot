@@ -86,7 +86,11 @@ module.exports = {
                 .addStringOption(option =>
                     option.setName('name')
                         .setDescription('Gear name to search for')
-                        .setRequired(true))),
+                        .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('stock')
+                .setDescription('Show items with low stock (less than 5)')),
 
     async execute(interaction, db) {
         try {
@@ -113,6 +117,9 @@ module.exports = {
                     break;
                 case 'search':
                     await this.handleSearch(interaction, db);
+                    break;
+                case 'stock':
+                    await this.handleStock(interaction, db);
                     break;
                 default:
                     await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
@@ -168,7 +175,7 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed] });
         } else {
             const embed = new EmbedBuilder()
                 .setColor('#FF0000')
@@ -177,7 +184,7 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed] });
         }
     },
 
@@ -196,7 +203,7 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+            return interaction.reply({ embeds: [embed] });
         }
 
         // Group by slot
@@ -252,7 +259,7 @@ module.exports = {
             embed.addFields(fields.slice(0, 25)); // Max 25 fields per embed
         }
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed] });
     },
 
     async handleSearch(interaction, db) {
@@ -268,7 +275,7 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+            return interaction.reply({ embeds: [embed] });
         }
 
         const embed = new EmbedBuilder()
@@ -289,7 +296,87 @@ module.exports = {
 
         embed.addFields(fields);
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed] });
+    },
+
+    async handleStock(interaction, db) {
+        // Get all inventory items
+        const inventory = await db.getInventory(interaction.guildId);
+
+        // Filter items with quantity less than 5
+        const lowStockItems = inventory.filter(item => item.quantity < 5);
+
+        if (lowStockItems.length === 0) {
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle('✅ Stock Status')
+                .setDescription('All items have sufficient stock (5 or more)!')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // Sort by quantity (lowest first)
+        lowStockItems.sort((a, b) => a.quantity - b.quantity);
+
+        // Group by slot
+        const grouped = {};
+        lowStockItems.forEach(item => {
+            if (!grouped[item.slot]) {
+                grouped[item.slot] = [];
+            }
+            grouped[item.slot].push(item);
+        });
+
+        const embed = new EmbedBuilder()
+            .setColor('#FFAA00')
+            .setTitle('⚠️ Low Stock Alert')
+            .setDescription(`Found ${lowStockItems.length} item(s) with less than 5 in stock:`)
+            .setFooter({ text: 'Phoenix Assistance Bot' })
+            .setTimestamp();
+
+        let fields = [];
+        for (const [slot, items] of Object.entries(grouped)) {
+            let slotText = '';
+            
+            items.forEach(item => {
+                const stockLevel = item.quantity === 0 ? '🔴 OUT OF STOCK' : 
+                                  item.quantity === 1 ? '🟠 Critical' : 
+                                  item.quantity <= 2 ? '🟡 Very Low' : '🟢 Low';
+                
+                slotText += `• **${item.name}** (${item.tierEquivalent}) - **${item.quantity}** ${stockLevel}`;
+                if (item.notes) {
+                    slotText += `\n  └ ${item.notes}`;
+                }
+                slotText += '\n';
+            });
+            
+            // Split into chunks if too long (Discord field value limit is 1024)
+            if (slotText.length > 1024) {
+                const chunks = slotText.match(/.{1,1000}/g) || [];
+                chunks.forEach((chunk, index) => {
+                    fields.push({
+                        name: index === 0 ? slot.charAt(0).toUpperCase() + slot.slice(1) : '\u200B',
+                        value: chunk,
+                        inline: false
+                    });
+                });
+            } else {
+                fields.push({
+                    name: slot.charAt(0).toUpperCase() + slot.slice(1),
+                    value: slotText || 'No items',
+                    inline: false
+                });
+            }
+        }
+
+        // Add fields (max 25 per embed)
+        if (fields.length > 0) {
+            embed.addFields(fields.slice(0, 25));
+        }
+
+        await interaction.reply({ embeds: [embed] });
     }
 };
 

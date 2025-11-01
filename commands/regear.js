@@ -52,7 +52,7 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            return interaction.reply({ embeds: [embed], ephemeral: true });
+            return interaction.reply({ embeds: [embed] });
         }
 
         // Group inventory by slot
@@ -114,7 +114,7 @@ module.exports = {
             .setFooter({ text: 'Phoenix Assistance Bot' })
             .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+        await interaction.reply({ embeds: [embed], components: rows });
     },
 
     async handleSelectMenuInteraction(interaction, db) {
@@ -127,7 +127,7 @@ module.exports = {
         const slot = customId.replace('regear_', '');
         
         if (!VALID_SLOTS.includes(slot)) {
-            await interaction.reply({ content: 'Invalid slot selected.', ephemeral: true });
+            await interaction.reply({ content: 'Invalid slot selected.' });
             return true;
         }
 
