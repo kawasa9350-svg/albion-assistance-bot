@@ -40,7 +40,8 @@ module.exports = {
                 .addStringOption(option =>
                     option.setName('name')
                         .setDescription('Gear name')
-                        .setRequired(true))
+                        .setRequired(true)
+                        .setAutocomplete(true))
                 .addStringOption(option =>
                     option.setName('tier')
                         .setDescription('Tier equivalent (e.g., T4.3, 4.3, T7)')
@@ -86,7 +87,8 @@ module.exports = {
                 .addStringOption(option =>
                     option.setName('name')
                         .setDescription('Gear name to search for')
-                        .setRequired(true)))
+                        .setRequired(true)
+                        .setAutocomplete(true)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('stock')
@@ -377,6 +379,67 @@ module.exports = {
         }
 
         await interaction.reply({ embeds: [embed] });
+    },
+
+    async autocomplete(interaction) {
+        try {
+            const focusedOption = interaction.options.getFocused(true);
+            const focusedValue = focusedOption.value;
+            
+            // Only handle autocomplete for 'name' options
+            if (focusedOption.name !== 'name') {
+                await interaction.respond([]);
+                return;
+            }
+            
+            // Get the command to access its database manager
+            const command = interaction.client.commands.get(interaction.commandName);
+            if (!command || !command.dbManager) {
+                console.error('Command or database manager not found for autocomplete');
+                await interaction.respond([]);
+                return;
+            }
+            
+            const db = command.dbManager;
+            
+            // Check if guild is registered
+            if (!(await db.isGuildRegistered(interaction.guildId))) {
+                await interaction.respond([]);
+                return;
+            }
+
+            // Get all inventory items
+            const inventory = await db.getInventory(interaction.guildId);
+            
+            // Extract unique item names (case-insensitive)
+            const uniqueNames = new Set();
+            inventory.forEach(item => {
+                uniqueNames.add(item.name);
+            });
+            
+            // Convert to array and filter based on user input
+            let filtered = Array.from(uniqueNames);
+            
+            if (focusedValue && focusedValue.length > 0) {
+                filtered = filtered.filter(name => 
+                    name.toLowerCase().includes(focusedValue.toLowerCase())
+                );
+            }
+            
+            // Sort alphabetically and limit to 25 choices (Discord max)
+            filtered = filtered.sort().slice(0, 25);
+
+            // Create autocomplete choices
+            const choices = filtered.map(name => ({
+                name: name,
+                value: name
+            }));
+
+            await interaction.respond(choices);
+        } catch (error) {
+            console.error('Error in inventory autocomplete:', error);
+            await interaction.respond([]);
+        }
     }
 };
 
