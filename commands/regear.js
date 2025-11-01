@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require('discord.js');
 const { parseTierEquivalent } = require('./inventory.js');
 
 const VALID_SLOTS = ['head', 'chest', 'shoes', 'main-hand', 'off-hand'];
@@ -55,6 +55,16 @@ function parseSelectionsFromEmbed(embed) {
         if (tierMatch) {
             selections.selectedTier = tierMatch[1].trim();
         }
+        
+        // Parse recipient user tag and ID
+        const recipientMatch = embed.description.match(/\*\*Recipient:\*\*\s*(.+?)(?:\n|$)/);
+        if (recipientMatch) {
+            selections.targetUserTag = recipientMatch[1].trim();
+        }
+        const recipientIdMatch = embed.description.match(/\*\*Recipient ID:\*\*\s*(.+?)(?:\n|$)/);
+        if (recipientIdMatch) {
+            selections.targetUserId = recipientIdMatch[1].trim();
+        }
     }
     
     // Parse slot selections from fields (for summary on page 3 or selections on page 2)
@@ -84,7 +94,23 @@ function parseSelectionsFromEmbed(embed) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('regear')
-        .setDescription('Request a regear using items from inventory'),
+        .setDescription('Issue a regear to a user using items from inventory')
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('give')
+                .setDescription('Issue a regear to a user')
+                .addUserOption(option =>
+                    option.setName('user')
+                        .setDescription('The user to give the regear to')
+                        .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('setup')
+                .setDescription('Set up regear logging channel')
+                .addChannelOption(option =>
+                    option.setName('channel')
+                        .setDescription('The channel to send regear logs to')
+                        .setRequired(true))),
 
     async execute(interaction, db) {
         try {
@@ -100,7 +126,14 @@ module.exports = {
                 return interaction.reply({ embeds: [embed], ephemeral: true });
             }
 
-            await this.showRegearMenu(interaction, db, {});
+            const subcommand = interaction.options.getSubcommand();
+
+            if (subcommand === 'setup') {
+                return await this.handleSetup(interaction, db);
+            } else if (subcommand === 'give') {
+                const targetUser = interaction.options.getUser('user');
+                await this.showRegearMenu(interaction, db, { targetUserId: targetUser.id, targetUserTag: targetUser.tag });
+            }
         } catch (error) {
             console.error('Error in regear command:', error);
             const embed = new EmbedBuilder()
@@ -115,6 +148,56 @@ module.exports = {
             } else if (interaction.deferred) {
                 await interaction.editReply({ embeds: [embed] });
             }
+        }
+    },
+
+    async handleSetup(interaction, db) {
+        try {
+            const channel = interaction.options.getChannel('channel');
+            
+            // Verify it's a text channel
+            if (channel.type !== ChannelType.GuildText) {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Invalid Channel')
+                    .setDescription('Please select a text channel.')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+
+            const success = await db.setRegearLogChannel(interaction.guildId, channel.id);
+
+            if (success) {
+                const embed = new EmbedBuilder()
+                    .setColor('#00FF00')
+                    .setTitle('✅ Regear Log Channel Set')
+                    .setDescription(`Regear logs will now be sent to ${channel}.`)
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            } else {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Error')
+                    .setDescription('Failed to set regear log channel. Please try again.')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+        } catch (error) {
+            console.error('Error in regear setup:', error);
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('An error occurred while setting up the regear log channel.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            return interaction.reply({ embeds: [embed], ephemeral: true });
         }
     },
 
@@ -165,12 +248,16 @@ module.exports = {
                 ]);
             });
 
+            const targetUserInfo = currentSelections.targetUserTag 
+                ? `\n**Recipient:** ${currentSelections.targetUserTag}${currentSelections.targetUserId ? `\n**Recipient ID:** ${currentSelections.targetUserId}` : ''}` 
+                : '';
+            
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle('🎒 Regear Request - Step 1: Select Tier')
-                .setDescription(selectedTier 
-                    ? `**Selected Tier: ${selectedTier}**\n\nClick **Next** to proceed to gear selection.`
-                    : 'Select a tier from the dropdown below, then click **Next** to continue.')
+                .setDescription((selectedTier 
+                    ? `**Selected Tier: ${selectedTier}**${targetUserInfo}\n\nClick **Next** to proceed to gear selection.`
+                    : `Select a tier from the dropdown below, then click **Next** to continue.${targetUserInfo}`))
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
@@ -279,10 +366,14 @@ module.exports = {
                 selectedItemsText = 'No items selected yet.';
             }
 
+            const targetUserInfo = currentSelections.targetUserTag 
+                ? `\n**Recipient:** ${currentSelections.targetUserTag}${currentSelections.targetUserId ? `\n**Recipient ID:** ${currentSelections.targetUserId}` : ''}` 
+                : '';
+            
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle('🎒 Regear Request - Step 2: Select Head, Chest, Shoes')
-                .setDescription(`**Tier: ${selectedTier}**\n\nSelect gear for Head, Chest, and Shoes.`)
+                .setDescription(`**Tier: ${selectedTier}**${targetUserInfo}\n\nSelect gear for Head, Chest, and Shoes.`)
                 .addFields({ name: 'Selected Items', value: selectedItemsText, inline: false })
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
@@ -388,10 +479,14 @@ module.exports = {
                 summaryText = 'No items selected yet.';
             }
 
+            const targetUserInfo = currentSelections.targetUserTag 
+                ? `\n**Recipient:** ${currentSelections.targetUserTag}${currentSelections.targetUserId ? `\n**Recipient ID:** ${currentSelections.targetUserId}` : ''}` 
+                : '';
+            
             const embed = new EmbedBuilder()
                 .setColor('#0099FF')
                 .setTitle('🎒 Regear Request - Step 3: Select Main-Hand, Off-Hand & Confirm')
-                .setDescription(`**Tier: ${selectedTier}**\n\nSelect Main-Hand and Off-Hand gear, then review your selections below and click **Confirm** to finalize.`)
+                .setDescription(`**Tier: ${selectedTier}**${targetUserInfo}\n\nSelect Main-Hand and Off-Hand gear, then review your selections below and click **Confirm** to finalize.`)
                 .addFields({ name: 'Summary', value: summaryText, inline: false })
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
@@ -597,6 +692,11 @@ module.exports = {
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
+            // Log to regear log channel if configured
+            if (results.length > 0) {
+                await this.logRegearToChannel(interaction, db, selections, results);
+            }
+
             // Clear all components
             await interaction.editReply({ embeds: [embed], components: [] });
             return true;
@@ -609,5 +709,90 @@ module.exports = {
         }
 
         return false;
+    },
+
+    async logRegearToChannel(interaction, db, selections, results) {
+        try {
+            const logChannelId = await db.getRegearLogChannel(interaction.guildId);
+            if (!logChannelId) {
+                return; // No log channel configured
+            }
+
+            const logChannel = await interaction.guild.channels.fetch(logChannelId);
+            if (!logChannel) {
+                console.error(`Regear log channel ${logChannelId} not found in guild ${interaction.guildId}`);
+                return;
+            }
+
+            // Get issuer info
+            const issuer = interaction.user;
+            const issuerInfo = `${issuer.tag} (${issuer.id})`;
+
+            // Get recipient info
+            const recipientTag = selections.targetUserTag || 'Unknown';
+            const recipientId = selections.targetUserId || 'Unknown';
+            const recipientInfo = recipientId !== 'Unknown' ? `<@${recipientId}> (${recipientTag})` : recipientTag;
+
+            // Build regear details for embed
+            let regearDetails = '';
+            const selectedTier = selections.selectedTier || 'Unknown';
+            
+            for (const result of results) {
+                regearDetails += `• **${formatSlotName(result.slot)}:** ${result.name} (${result.tierEquivalent})\n`;
+            }
+
+            // Build formatted table row for Google Sheets/Docs
+            const date = new Date().toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: '2-digit', 
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            // Organize gear by slot
+            const gearBySlot = {
+                'main-hand': '',
+                'off-hand': '',
+                'head': '',
+                'chest': '',
+                'shoes': ''
+            };
+            
+            for (const result of results) {
+                const gearName = `${result.name} (${result.tierEquivalent})`;
+                gearBySlot[result.slot] = gearName;
+            }
+
+            // Format as tab-separated values (TSV) for easy copy-paste to Google Sheets
+            const tableRow = `Date\tPlayer\tMain-hand\tOff-hand\tHead\tChest\tShoes\tTier\tGiven By\n${date}\t${recipientTag}\t${gearBySlot['main-hand'] || ''}\t${gearBySlot['off-hand'] || ''}\t${gearBySlot['head'] || ''}\t${gearBySlot['chest'] || ''}\t${gearBySlot['shoes'] || ''}\t${selectedTier}\t${issuer.tag}`;
+
+            // Format as markdown table for Discord
+            const markdownTable = `\`\`\`
+Date\tPlayer\tMain-hand\tOff-hand\tHead\tChest\tShoes\tTier\tGiven By
+${date}\t${recipientTag}\t${gearBySlot['main-hand'] || ''}\t${gearBySlot['off-hand'] || ''}\t${gearBySlot['head'] || ''}\t${gearBySlot['chest'] || ''}\t${gearBySlot['shoes'] || ''}\t${selectedTier}\t${issuer.tag}
+\`\`\`
+
+**Copy the table above and paste into Google Sheets/Docs**`;
+
+            const logEmbed = new EmbedBuilder()
+                .setColor('#0099FF')
+                .setTitle('🎒 Regear Issued')
+                .addFields(
+                    { name: 'Issued By', value: issuerInfo, inline: true },
+                    { name: 'Recipient', value: recipientInfo, inline: true },
+                    { name: 'Tier', value: selectedTier, inline: true },
+                    { name: 'Regear Details', value: regearDetails || 'No items', inline: false }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            // Send embed and table format
+            await logChannel.send({ embeds: [logEmbed] });
+            await logChannel.send(markdownTable);
+        } catch (error) {
+            console.error('Error logging regear to channel:', error);
+            // Don't throw - logging failure shouldn't break the regear process
+        }
     }
 };

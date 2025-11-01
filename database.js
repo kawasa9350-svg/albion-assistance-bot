@@ -1676,6 +1676,33 @@ class DatabaseManager {
             return [];
         }
     }
+
+    async setRegearLogChannel(guildId, channelId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            await collection.updateOne(
+                { guildId: guildId },
+                { $set: { regearLogChannelId: channelId } },
+                { upsert: false }
+            );
+            console.log(`✅ Set regear log channel: ${channelId} for guild ${guildId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Failed to set regear log channel:', error);
+            return false;
+        }
+    }
+
+    async getRegearLogChannel(guildId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const guild = await collection.findOne({ guildId: guildId });
+            return guild ? guild.regearLogChannelId : null;
+        } catch (error) {
+            console.error('❌ Failed to get regear log channel:', error);
+            return null;
+        }
+    }
 }
 
 module.exports = DatabaseManager;
