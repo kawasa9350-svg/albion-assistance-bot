@@ -1516,6 +1516,166 @@ class DatabaseManager {
             return false;
         }
     }
+
+    // Inventory management methods
+    async addGearToInventory(guildId, gearData) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            console.log(`📦 Adding gear to inventory: ${gearData.name} (${gearData.slot}) for guild ${guildId}`);
+            
+            // Check if gear already exists with same name, slot, and tier equivalent
+            const existingGear = await collection.findOne({
+                guildId: guildId,
+                type: 'inventory_item',
+                name: gearData.name,
+                slot: gearData.slot,
+                tierEquivalent: gearData.tierEquivalent
+            });
+            
+            if (existingGear) {
+                // Update quantity instead of creating duplicate
+                const result = await collection.updateOne(
+                    {
+                        guildId: guildId,
+                        type: 'inventory_item',
+                        name: gearData.name,
+                        slot: gearData.slot,
+                        tierEquivalent: gearData.tierEquivalent
+                    },
+                    { $inc: { quantity: gearData.quantity || 1 } }
+                );
+                
+                console.log(`✅ Updated quantity for existing gear: ${gearData.name}`);
+                return result.modifiedCount > 0;
+            } else {
+                // Create new gear entry
+                const gear = {
+                    guildId: guildId,
+                    type: 'inventory_item',
+                    name: gearData.name,
+                    slot: gearData.slot,
+                    tierEquivalent: gearData.tierEquivalent,
+                    quantity: gearData.quantity || 1,
+                    notes: gearData.notes || '',
+                    createdAt: new Date()
+                };
+                
+                const result = await collection.insertOne(gear);
+                console.log(`✅ Added new gear to inventory: ${gearData.name}`);
+                return result.acknowledged;
+            }
+        } catch (error) {
+            console.error('❌ Failed to add gear to inventory:', error);
+            return false;
+        }
+    }
+
+    async getInventory(guildId, slot = null, tierEquivalent = null, searchName = null) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            
+            let query = {
+                guildId: guildId,
+                type: 'inventory_item'
+            };
+            
+            if (slot) {
+                query.slot = slot;
+            }
+            
+            if (tierEquivalent) {
+                query.tierEquivalent = tierEquivalent;
+            }
+            
+            if (searchName) {
+                query.name = { $regex: searchName, $options: 'i' };
+            }
+            
+            const inventory = await collection.find(query).toArray();
+            
+            // Filter by search name if provided (case-insensitive)
+            let filteredInventory = inventory;
+            if (searchName && !query.name) {
+                filteredInventory = inventory.filter(item => 
+                    item.name.toLowerCase().includes(searchName.toLowerCase())
+                );
+            }
+            
+            return filteredInventory;
+        } catch (error) {
+            console.error('❌ Failed to get inventory:', error);
+            return [];
+        }
+    }
+
+    async removeGearFromInventory(guildId, gearName, slot, tierEquivalent, quantity = 1) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            console.log(`📦 Removing gear from inventory: ${gearName} (${slot}, ${tierEquivalent}), quantity: ${quantity} for guild ${guildId}`);
+            
+            const gear = await collection.findOne({
+                guildId: guildId,
+                type: 'inventory_item',
+                name: gearName,
+                slot: slot,
+                tierEquivalent: tierEquivalent
+            });
+            
+            if (!gear) {
+                console.log(`❌ Gear not found: ${gearName} (${slot}, ${tierEquivalent})`);
+                return { success: false, error: 'Gear not found in inventory' };
+            }
+            
+            if (gear.quantity <= quantity) {
+                // Remove the gear entry completely
+                const result = await collection.deleteOne({
+                    guildId: guildId,
+                    type: 'inventory_item',
+                    name: gearName,
+                    slot: slot,
+                    tierEquivalent: tierEquivalent
+                });
+                
+                console.log(`✅ Removed gear completely from inventory: ${gearName}`);
+                return { success: true, remainingQuantity: 0 };
+            } else {
+                // Decrease quantity
+                const result = await collection.updateOne(
+                    {
+                        guildId: guildId,
+                        type: 'inventory_item',
+                        name: gearName,
+                        slot: slot,
+                        tierEquivalent: tierEquivalent
+                    },
+                    { $inc: { quantity: -quantity } }
+                );
+                
+                const remainingGear = await collection.findOne({
+                    guildId: guildId,
+                    type: 'inventory_item',
+                    name: gearName,
+                    slot: slot,
+                    tierEquivalent: tierEquivalent
+                });
+                
+                console.log(`✅ Decreased quantity for gear: ${gearName}, remaining: ${remainingGear.quantity}`);
+                return { success: true, remainingQuantity: remainingGear.quantity };
+            }
+        } catch (error) {
+            console.error('❌ Failed to remove gear from inventory:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getInventoryBySlot(guildId, slot) {
+        try {
+            return await this.getInventory(guildId, slot);
+        } catch (error) {
+            console.error('❌ Failed to get inventory by slot:', error);
+            return [];
+        }
+    }
 }
 
 module.exports = DatabaseManager;

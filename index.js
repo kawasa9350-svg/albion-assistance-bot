@@ -889,6 +889,19 @@ client.handleSelectMenuInteraction = async (interaction) => {
         } else {
             console.error('Signup command or handleCompSelection method not found');
         }
+    } else if (customId.startsWith('regear_')) {
+        console.log('Regear select menu detected, routing to regear command');
+        
+        // This is a regear selection
+        const regearCommand = client.commands.get('regear');
+        if (regearCommand && regearCommand.handleSelectMenuInteraction) {
+            const handled = await regearCommand.handleSelectMenuInteraction(interaction, regearCommand.dbManager);
+            if (!handled) {
+                console.error('Regear select menu interaction was not handled');
+            }
+        } else {
+            console.error('Regear command or handleSelectMenuInteraction method not found');
+        }
     }
 };
 

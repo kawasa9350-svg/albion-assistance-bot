@@ -1,0 +1,298 @@
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
+
+// Helper function to parse tier equivalent
+function parseTierEquivalent(tierInput) {
+    // Remove T prefix if present and whitespace
+    let cleaned = tierInput.trim().toUpperCase().replace(/^T/, '');
+    
+    // Check if it's in format like "4.3" or "4.3"
+    const match = cleaned.match(/^(\d+)\.(\d+)$/);
+    if (match) {
+        const tier = parseInt(match[1]);
+        const enchant = parseInt(match[2]);
+        const tierEquivalent = tier + enchant;
+        return `T${tierEquivalent}`;
+    }
+    
+    // If it's just a number like "7" or "T7", return as T7
+    const numberMatch = cleaned.match(/^(\d+)$/);
+    if (numberMatch) {
+        return `T${numberMatch[1]}`;
+    }
+    
+    // If already in T7 format, return as is
+    if (cleaned.match(/^T?\d+$/)) {
+        return cleaned.startsWith('T') ? cleaned : `T${cleaned}`;
+    }
+    
+    // Default: return input with T prefix if missing
+    return cleaned.startsWith('T') ? cleaned : `T${cleaned}`;
+}
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('inventory')
+        .setDescription('Manage guild inventory')
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('add')
+                .setDescription('Add gear to inventory')
+                .addStringOption(option =>
+                    option.setName('name')
+                        .setDescription('Gear name')
+                        .setRequired(true))
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Tier equivalent (e.g., T4.3, 4.3, T7)')
+                        .setRequired(true))
+                .addStringOption(option =>
+                    option.setName('slot')
+                        .setDescription('Gear slot')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: 'Head', value: 'head' },
+                            { name: 'Chest', value: 'chest' },
+                            { name: 'Shoes', value: 'shoes' },
+                            { name: 'Main-Hand', value: 'main-hand' },
+                            { name: 'Off-Hand', value: 'off-hand' }
+                        ))
+                .addIntegerOption(option =>
+                    option.setName('quantity')
+                        .setDescription('Quantity to add (default: 1)')
+                        .setRequired(false))
+                .addStringOption(option =>
+                    option.setName('notes')
+                        .setDescription('Optional notes')
+                        .setRequired(false)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('list')
+                .setDescription('List all inventory items')
+                .addStringOption(option =>
+                    option.setName('slot')
+                        .setDescription('Filter by slot')
+                        .setRequired(false)
+                        .addChoices(
+                            { name: 'Head', value: 'head' },
+                            { name: 'Chest', value: 'chest' },
+                            { name: 'Shoes', value: 'shoes' },
+                            { name: 'Main-Hand', value: 'main-hand' },
+                            { name: 'Off-Hand', value: 'off-hand' }
+                        )))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('search')
+                .setDescription('Search for gear in inventory')
+                .addStringOption(option =>
+                    option.setName('name')
+                        .setDescription('Gear name to search for')
+                        .setRequired(true))),
+
+    async execute(interaction, db) {
+        try {
+            // Check if guild is registered
+            if (!(await db.isGuildRegistered(interaction.guildId))) {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Guild Not Registered')
+                    .setDescription('This guild must be registered first. Use `/guild-register` to get started.')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+
+            const subcommand = interaction.options.getSubcommand();
+
+            switch (subcommand) {
+                case 'add':
+                    await this.handleAdd(interaction, db);
+                    break;
+                case 'list':
+                    await this.handleList(interaction, db);
+                    break;
+                case 'search':
+                    await this.handleSearch(interaction, db);
+                    break;
+                default:
+                    await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
+            }
+        } catch (error) {
+            console.error('Error in inventory command:', error);
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('An error occurred while processing the inventory command.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            if (!interaction.replied && !interaction.deferred) {
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+            } else if (interaction.deferred) {
+                await interaction.editReply({ embeds: [embed] });
+            }
+        }
+    },
+
+    async handleAdd(interaction, db) {
+        const name = interaction.options.getString('name');
+        const tierInput = interaction.options.getString('tier');
+        const slot = interaction.options.getString('slot');
+        const quantity = interaction.options.getInteger('quantity') || 1;
+        const notes = interaction.options.getString('notes') || '';
+
+        // Parse tier equivalent
+        const tierEquivalent = parseTierEquivalent(tierInput);
+
+        const gearData = {
+            name: name,
+            slot: slot,
+            tierEquivalent: tierEquivalent,
+            quantity: quantity,
+            notes: notes
+        };
+
+        const success = await db.addGearToInventory(interaction.guildId, gearData);
+
+        if (success) {
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle('✅ Gear Added to Inventory')
+                .addFields(
+                    { name: 'Name', value: name, inline: true },
+                    { name: 'Slot', value: slot.charAt(0).toUpperCase() + slot.slice(1), inline: true },
+                    { name: 'Tier Equivalent', value: tierEquivalent, inline: true },
+                    { name: 'Quantity', value: quantity.toString(), inline: true },
+                    { name: 'Notes', value: notes || 'None', inline: false }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        } else {
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('Failed to add gear to inventory.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+    },
+
+    async handleList(interaction, db) {
+        const slotFilter = interaction.options.getString('slot');
+
+        const inventory = await db.getInventory(interaction.guildId, slotFilter);
+
+        if (inventory.length === 0) {
+            const embed = new EmbedBuilder()
+                .setColor('#FFAA00')
+                .setTitle('📦 Inventory Empty')
+                .setDescription(slotFilter 
+                    ? `No items found for slot: ${slotFilter}`
+                    : 'No items in inventory.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Group by slot
+        const grouped = {};
+        inventory.forEach(item => {
+            if (!grouped[item.slot]) {
+                grouped[item.slot] = [];
+            }
+            grouped[item.slot].push(item);
+        });
+
+        const embed = new EmbedBuilder()
+            .setColor('#0099FF')
+            .setTitle('📦 Inventory List')
+            .setDescription(slotFilter ? `Items in ${slotFilter} slot:` : 'All inventory items:')
+            .setFooter({ text: 'Phoenix Assistance Bot' })
+            .setTimestamp();
+
+        // Discord embed fields have a limit, so we'll format efficiently
+        let fields = [];
+        for (const [slot, items] of Object.entries(grouped)) {
+            let slotText = `**${slot.charAt(0).toUpperCase() + slot.slice(1)}:**\n`;
+            
+            items.forEach(item => {
+                slotText += `• ${item.name} (${item.tierEquivalent}) - Qty: ${item.quantity}`;
+                if (item.notes) {
+                    slotText += ` - ${item.notes}`;
+                }
+                slotText += '\n';
+            });
+            
+            // Split into chunks if too long (Discord field value limit is 1024)
+            if (slotText.length > 1024) {
+                const chunks = slotText.match(/.{1,1000}/g) || [];
+                chunks.forEach((chunk, index) => {
+                    fields.push({
+                        name: index === 0 ? slot.charAt(0).toUpperCase() + slot.slice(1) : '\u200B',
+                        value: chunk,
+                        inline: false
+                    });
+                });
+            } else {
+                fields.push({
+                    name: slot.charAt(0).toUpperCase() + slot.slice(1),
+                    value: slotText,
+                    inline: false
+                });
+            }
+        }
+
+        // Split into multiple embeds if needed (Discord allows max 6000 characters total)
+        if (fields.length > 0) {
+            embed.addFields(fields.slice(0, 25)); // Max 25 fields per embed
+        }
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    },
+
+    async handleSearch(interaction, db) {
+        const searchName = interaction.options.getString('name');
+
+        const inventory = await db.getInventory(interaction.guildId, null, null, searchName);
+
+        if (inventory.length === 0) {
+            const embed = new EmbedBuilder()
+                .setColor('#FFAA00')
+                .setTitle('🔍 Search Results')
+                .setDescription(`No items found matching: "${searchName}"`)
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor('#0099FF')
+            .setTitle('🔍 Search Results')
+            .setDescription(`Found ${inventory.length} item(s) matching "${searchName}":`)
+            .setFooter({ text: 'Phoenix Assistance Bot' })
+            .setTimestamp();
+
+        let fields = [];
+        inventory.forEach(item => {
+            fields.push({
+                name: `${item.name} (${item.tierEquivalent})`,
+                value: `Slot: ${item.slot.charAt(0).toUpperCase() + item.slot.slice(1)}\nQuantity: ${item.quantity}${item.notes ? `\nNotes: ${item.notes}` : ''}`,
+                inline: true
+            });
+        });
+
+        embed.addFields(fields);
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+};
+
+// Export the helper function for use in regear command
+module.exports.parseTierEquivalent = parseTierEquivalent;
+
