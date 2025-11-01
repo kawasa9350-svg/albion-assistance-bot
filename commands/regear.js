@@ -697,11 +697,18 @@ module.exports = {
                 await this.logRegearToChannel(interaction, db, selections, results);
             }
 
-            // Clear all components from the original message
-            await interaction.editReply({ embeds: [], components: [] });
-            
             // Send final confirmation as a public follow-up message
             await interaction.followUp({ embeds: [embed], ephemeral: false });
+            
+            // Update original message to show it's completed (keep minimal content to avoid empty message error)
+            const completedEmbed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle('✅ Regear Completed')
+                .setDescription('The regear has been successfully processed. See the message above for details.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+            
+            await interaction.editReply({ embeds: [completedEmbed], components: [] });
             return true;
         } else if (customId === 'regear_cancel') {
             await interaction.deferUpdate();
