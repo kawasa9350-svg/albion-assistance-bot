@@ -107,7 +107,12 @@ module.exports = {
                             { name: 'Shoes', value: 'shoes' },
                             { name: 'Main-Hand', value: 'main-hand' },
                             { name: 'Off-Hand', value: 'off-hand' }
-                        )))
+                        ))
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Filter by tier (e.g., T7)')
+                        .setRequired(false)
+                        .setAutocomplete(true)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('search')
@@ -131,7 +136,12 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('stock')
-                .setDescription('Show items with low stock (less than 5)')),
+                .setDescription('Show items with low stock (less than 5)')
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Filter by tier (e.g., T7)')
+                        .setRequired(false)
+                        .setAutocomplete(true))),
 
     async execute(interaction, db) {
         try {
@@ -231,16 +241,30 @@ module.exports = {
 
     async handleList(interaction, db) {
         const slotFilter = interaction.options.getString('slot');
+        const tierFilter = interaction.options.getString('tier');
+        
+        // Parse tier if provided
+        let tierEquivalent = null;
+        if (tierFilter) {
+            tierEquivalent = parseTierEquivalent(tierFilter);
+        }
 
-        const inventory = await db.getInventory(interaction.guildId, slotFilter);
+        const inventory = await db.getInventory(interaction.guildId, slotFilter, tierEquivalent);
 
         if (inventory.length === 0) {
+            let description = 'No items in inventory.';
+            if (slotFilter && tierEquivalent) {
+                description = `No items found for ${formatSlotName(slotFilter)} slot (${tierEquivalent}).`;
+            } else if (slotFilter) {
+                description = `No items found for ${formatSlotName(slotFilter)} slot.`;
+            } else if (tierEquivalent) {
+                description = `No items found for tier ${tierEquivalent}.`;
+            }
+            
             const embed = new EmbedBuilder()
                 .setColor('#FFAA00')
                 .setTitle('📦 Inventory Empty')
-                .setDescription(slotFilter 
-                    ? `No items found for slot: ${slotFilter}`
-                    : 'No items in inventory.')
+                .setDescription(description)
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
@@ -256,12 +280,22 @@ module.exports = {
             grouped[item.slot].push(item);
         });
 
-        const embed = new EmbedBuilder()
-            .setColor('#0099FF')
-            .setTitle('📦 Inventory List')
-            .setDescription(slotFilter ? `Items in ${slotFilter} slot:` : 'All inventory items:')
-            .setFooter({ text: 'Phoenix Assistance Bot' })
-            .setTimestamp();
+            // Build description based on filters
+            let description = 'All inventory items:';
+            if (slotFilter && tierEquivalent) {
+                description = `Items in ${formatSlotName(slotFilter)} slot (${tierEquivalent}):`;
+            } else if (slotFilter) {
+                description = `Items in ${formatSlotName(slotFilter)} slot:`;
+            } else if (tierEquivalent) {
+                description = `Items in tier ${tierEquivalent}:`;
+            }
+            
+            const embed = new EmbedBuilder()
+                .setColor('#0099FF')
+                .setTitle('📦 Inventory List')
+                .setDescription(description)
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
 
         // Discord embed fields have a limit, so we'll format efficiently
         let fields = [];
@@ -347,8 +381,16 @@ module.exports = {
     },
 
     async handleStock(interaction, db) {
-        // Get all inventory items
-        const inventory = await db.getInventory(interaction.guildId);
+        const tierFilter = interaction.options.getString('tier');
+        
+        // Parse tier if provided
+        let tierEquivalent = null;
+        if (tierFilter) {
+            tierEquivalent = parseTierEquivalent(tierFilter);
+        }
+
+        // Get inventory items (filtered by tier if provided)
+        const inventory = await db.getInventory(interaction.guildId, null, tierEquivalent);
 
         // Filter items with quantity less than 5
         const lowStockItems = inventory.filter(item => item.quantity < 5);
@@ -376,10 +418,16 @@ module.exports = {
             grouped[item.slot].push(item);
         });
 
+        // Build description based on tier filter
+        let description = `Found ${lowStockItems.length} item(s) with less than 5 in stock:`;
+        if (tierEquivalent) {
+            description = `Found ${lowStockItems.length} item(s) with less than 5 in stock (Tier ${tierEquivalent}):`;
+        }
+        
         const embed = new EmbedBuilder()
             .setColor('#FFAA00')
             .setTitle('⚠️ Low Stock Alert')
-            .setDescription(`Found ${lowStockItems.length} item(s) with less than 5 in stock:`)
+            .setDescription(description)
             .setFooter({ text: 'Phoenix Assistance Bot' })
             .setTimestamp();
 
@@ -431,12 +479,6 @@ module.exports = {
             const focusedOption = interaction.options.getFocused(true);
             const focusedValue = focusedOption.value;
             
-            // Only handle autocomplete for 'name' options
-            if (focusedOption.name !== 'name') {
-                await interaction.respond([]);
-                return;
-            }
-            
             // Get the command to access its database manager
             const command = interaction.client.commands.get(interaction.commandName);
             if (!command || !command.dbManager) {
@@ -453,37 +495,84 @@ module.exports = {
                 return;
             }
 
-            // Get the selected slot from options
-            const selectedSlot = interaction.options.getString('slot');
-            
-            // Get inventory items filtered by slot if slot is selected
-            const inventory = await db.getInventory(interaction.guildId, selectedSlot || null);
-            
-            // Extract unique item names (case-insensitive) from filtered inventory
-            const uniqueNames = new Set();
-            inventory.forEach(item => {
-                uniqueNames.add(item.name);
-            });
-            
-            // Convert to array and filter based on user input
-            let filtered = Array.from(uniqueNames);
-            
-            if (focusedValue && focusedValue.length > 0) {
-                filtered = filtered.filter(name => 
-                    name.toLowerCase().includes(focusedValue.toLowerCase())
-                );
+            // Handle tier autocomplete
+            if (focusedOption.name === 'tier') {
+                // Get all inventory items
+                const inventory = await db.getInventory(interaction.guildId);
+                
+                // Extract unique tier equivalents
+                const uniqueTiers = new Set();
+                inventory.forEach(item => {
+                    uniqueTiers.add(item.tierEquivalent);
+                });
+                
+                // Sort tiers by tier number (lower first)
+                const sortedTiers = Array.from(uniqueTiers).sort((a, b) => {
+                    const tierA = getTierNumber(a);
+                    const tierB = getTierNumber(b);
+                    return tierA - tierB;
+                });
+                
+                // Filter based on user input
+                let filtered = sortedTiers;
+                if (focusedValue && focusedValue.length > 0) {
+                    const lowerValue = focusedValue.toLowerCase();
+                    filtered = sortedTiers.filter(tier => 
+                        tier.toLowerCase().includes(lowerValue)
+                    );
+                }
+                
+                // Limit to 25 choices (Discord max)
+                filtered = filtered.slice(0, 25);
+                
+                // Create autocomplete choices
+                const choices = filtered.map(tier => ({
+                    name: tier,
+                    value: tier
+                }));
+                
+                await interaction.respond(choices);
+                return;
             }
             
-            // Sort alphabetically and limit to 25 choices (Discord max)
-            filtered = filtered.sort().slice(0, 25);
+            // Handle name autocomplete
+            if (focusedOption.name === 'name') {
+                // Get the selected slot from options
+                const selectedSlot = interaction.options.getString('slot');
+                
+                // Get inventory items filtered by slot if slot is selected
+                const inventory = await db.getInventory(interaction.guildId, selectedSlot || null);
+                
+                // Extract unique item names (case-insensitive) from filtered inventory
+                const uniqueNames = new Set();
+                inventory.forEach(item => {
+                    uniqueNames.add(item.name);
+                });
+                
+                // Convert to array and filter based on user input
+                let filtered = Array.from(uniqueNames);
+                
+                if (focusedValue && focusedValue.length > 0) {
+                    filtered = filtered.filter(name => 
+                        name.toLowerCase().includes(focusedValue.toLowerCase())
+                    );
+                }
+                
+                // Sort alphabetically and limit to 25 choices (Discord max)
+                filtered = filtered.sort().slice(0, 25);
 
-            // Create autocomplete choices
-            const choices = filtered.map(name => ({
-                name: name,
-                value: name
-            }));
+                // Create autocomplete choices
+                const choices = filtered.map(name => ({
+                    name: name,
+                    value: name
+                }));
 
-            await interaction.respond(choices);
+                await interaction.respond(choices);
+                return;
+            }
+            
+            // For other options, return empty
+            await interaction.respond([]);
         } catch (error) {
             console.error('Error in inventory autocomplete:', error);
             await interaction.respond([]);
