@@ -89,19 +89,36 @@ module.exports = {
                     .setMinValues(0)
                     .setMaxValues(1);
                 
-                // Add options for each item (format: name|tierEquivalent for customId)
+                // Track seen values to prevent duplicates
+                const seenValues = new Set();
+                const options = [];
+                
+                // Add options for each item (format: name|tierEquivalent|slot for value)
                 slotItems.forEach(item => {
-                    const label = `${item.name} (${item.tierEquivalent})`;
-                    const description = `Qty: ${item.quantity}${item.notes ? ` | ${item.notes}` : ''}`;
                     const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
                     
-                    selectMenu.addOptions([
+                    // Skip if we've already seen this exact value
+                    if (seenValues.has(value)) {
+                        return;
+                    }
+                    
+                    seenValues.add(value);
+                    
+                    const label = `${item.name} (${item.tierEquivalent})`;
+                    const description = `Qty: ${item.quantity}${item.notes ? ` | ${item.notes}` : ''}`;
+                    
+                    options.push(
                         new StringSelectMenuOptionBuilder()
                             .setLabel(label.length > 100 ? label.substring(0, 97) + '...' : label)
                             .setDescription(description.length > 100 ? description.substring(0, 97) + '...' : description)
                             .setValue(value)
-                    ]);
+                    );
                 });
+                
+                // Add all options at once
+                if (options.length > 0) {
+                    selectMenu.addOptions(options);
+                }
                 
                 rows.push(new ActionRowBuilder().addComponents(selectMenu));
             }
@@ -197,18 +214,35 @@ module.exports = {
                     .setMinValues(0)
                     .setMaxValues(1);
                 
+                // Track seen values to prevent duplicates
+                const seenValues = new Set();
+                const options = [];
+                
                 slotItems.forEach(item => {
-                    const label = `${item.name} (${item.tierEquivalent})`;
-                    const description = `Qty: ${item.quantity}${item.notes ? ` | ${item.notes}` : ''}`;
                     const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
                     
-                    selectMenu.addOptions([
+                    // Skip if we've already seen this exact value
+                    if (seenValues.has(value)) {
+                        return;
+                    }
+                    
+                    seenValues.add(value);
+                    
+                    const label = `${item.name} (${item.tierEquivalent})`;
+                    const description = `Qty: ${item.quantity}${item.notes ? ` | ${item.notes}` : ''}`;
+                    
+                    options.push(
                         new StringSelectMenuOptionBuilder()
                             .setLabel(label.length > 100 ? label.substring(0, 97) + '...' : label)
                             .setDescription(description.length > 100 ? description.substring(0, 97) + '...' : description)
                             .setValue(value)
-                    ]);
+                    );
                 });
+                
+                // Add all options at once
+                if (options.length > 0) {
+                    selectMenu.addOptions(options);
+                }
                 
                 rows.push(new ActionRowBuilder().addComponents(selectMenu));
             }
