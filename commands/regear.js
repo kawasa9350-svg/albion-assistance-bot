@@ -728,10 +728,9 @@ module.exports = {
             const issuer = interaction.user;
             const issuerInfo = `${issuer.tag} (${issuer.id})`;
 
-            // Get recipient info
-            const recipientTag = selections.targetUserTag || 'Unknown';
+            // Get recipient info (only show mention, no username/tag)
             const recipientId = selections.targetUserId || 'Unknown';
-            const recipientInfo = recipientId !== 'Unknown' ? `<@${recipientId}> (${recipientTag})` : recipientTag;
+            const recipientInfo = recipientId !== 'Unknown' ? `<@${recipientId}>` : 'Unknown';
 
             // Build regear details for embed
             let regearDetails = '';
@@ -764,16 +763,40 @@ module.exports = {
                 gearBySlot[result.slot] = gearName;
             }
 
-            // Format as tab-separated values (TSV) for easy copy-paste to Google Sheets
-            const tableRow = `Date\tPlayer\tMain-hand\tOff-hand\tHead\tChest\tShoes\tTier\tGiven By\n${date}\t${recipientTag}\t${gearBySlot['main-hand'] || ''}\t${gearBySlot['off-hand'] || ''}\t${gearBySlot['head'] || ''}\t${gearBySlot['chest'] || ''}\t${gearBySlot['shoes'] || ''}\t${selectedTier}\t${issuer.tag}`;
+            // For table, use just the tag (no mention, no ID)
+            const recipientTag = selections.targetUserTag || 'Unknown';
+            
+            // Escape commas in values for CSV format
+            const escapeCSV = (value) => {
+                if (!value) return '';
+                // If value contains comma, quote, or newline, wrap in quotes and escape quotes
+                if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                    return `"${value.replace(/"/g, '""')}"`;
+                }
+                return value;
+            };
+            
+            // Format as CSV (comma-separated values) for easy copy-paste to Google Sheets
+            const csvHeader = 'Date,Player,Main-hand,Off-hand,Head,Chest,Shoes,Tier,Given By';
+            const csvRow = [
+                date,
+                escapeCSV(recipientTag),
+                escapeCSV(gearBySlot['main-hand'] || ''),
+                escapeCSV(gearBySlot['off-hand'] || ''),
+                escapeCSV(gearBySlot['head'] || ''),
+                escapeCSV(gearBySlot['chest'] || ''),
+                escapeCSV(gearBySlot['shoes'] || ''),
+                escapeCSV(selectedTier),
+                escapeCSV(issuer.tag)
+            ].join(',');
 
-            // Format as markdown table for Discord
-            const markdownTable = `\`\`\`
-Date\tPlayer\tMain-hand\tOff-hand\tHead\tChest\tShoes\tTier\tGiven By
-${date}\t${recipientTag}\t${gearBySlot['main-hand'] || ''}\t${gearBySlot['off-hand'] || ''}\t${gearBySlot['head'] || ''}\t${gearBySlot['chest'] || ''}\t${gearBySlot['shoes'] || ''}\t${selectedTier}\t${issuer.tag}
+            // Format as CSV for Discord (easier to copy and paste into Google Sheets)
+            const csvTable = `\`\`\`
+${csvHeader}
+${csvRow}
 \`\`\`
 
-**Copy the table above and paste into Google Sheets/Docs**`;
+**📋 Copy the CSV above and paste into Google Sheets - it will automatically separate into columns**`;
 
             const logEmbed = new EmbedBuilder()
                 .setColor('#0099FF')
@@ -787,9 +810,9 @@ ${date}\t${recipientTag}\t${gearBySlot['main-hand'] || ''}\t${gearBySlot['off-ha
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
-            // Send embed and table format
+            // Send embed and CSV format
             await logChannel.send({ embeds: [logEmbed] });
-            await logChannel.send(markdownTable);
+            await logChannel.send(csvTable);
         } catch (error) {
             console.error('Error logging regear to channel:', error);
             // Don't throw - logging failure shouldn't break the regear process
