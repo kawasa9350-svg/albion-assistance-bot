@@ -669,28 +669,56 @@ module.exports = {
                 }
             }
 
-            // Build confirmation embed
-            let resultText = '';
+            // Get tier, issuer, and recipient info
+            const selectedTier = selections.selectedTier || 'Unknown';
+            const issuer = interaction.user;
+            const issuerInfo = `<@${issuer.id}>`;
+            const recipientId = selections.targetUserId || 'Unknown';
+            const recipientInfo = recipientId !== 'Unknown' ? `<@${recipientId}>` : 'Unknown';
+            
+            // Build regear details with emojis
+            let regearDetails = '';
             if (results.length > 0) {
-                resultText += '**✅ Successfully Issued:**\n';
                 results.forEach(r => {
-                    resultText += `• **${formatSlotName(r.slot)}:** ${r.name} (${r.tierEquivalent}) - Remaining: ${r.remainingQuantity}\n`;
+                    // Add emoji based on slot type
+                    let slotEmoji = '🎒';
+                    if (r.slot === 'head') slotEmoji = '🪖';
+                    else if (r.slot === 'chest') slotEmoji = '🦺';
+                    else if (r.slot === 'shoes') slotEmoji = '👟';
+                    else if (r.slot === 'main-hand') slotEmoji = '⚔️';
+                    else if (r.slot === 'off-hand') slotEmoji = '🛡️';
+                    
+                    regearDetails += `${slotEmoji} **${formatSlotName(r.slot)}:** ${r.name} (${r.tierEquivalent})\n`;
                 });
+            } else {
+                regearDetails = 'No items were processed.';
             }
-
+            
+            // Build error details if any
+            let errorDetails = '';
             if (errors.length > 0) {
-                resultText += '\n**❌ Errors:**\n';
+                errorDetails += '\n**❌ Errors:**\n';
                 errors.forEach(e => {
-                    resultText += `• **${formatSlotName(e.slot)}:** ${e.name} - ${e.error}\n`;
+                    errorDetails += `• **${formatSlotName(e.slot)}:** ${e.name} - ${e.error}\n`;
                 });
             }
 
             const embed = new EmbedBuilder()
                 .setColor(errors.length > 0 ? '#FFAA00' : '#00FF00')
                 .setTitle(errors.length > 0 ? '⚠️ Regear Partially Completed' : '✅ Regear Completed')
-                .setDescription(resultText || 'No items were processed.')
+                .addFields(
+                    { name: '👤 Issued By', value: issuerInfo, inline: true },
+                    { name: '🎯 Recipient', value: recipientInfo, inline: true },
+                    { name: '⚡ Tier', value: selectedTier, inline: true },
+                    { name: '🎒 Regear Details', value: regearDetails || 'No items', inline: false }
+                )
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
+            
+            // Add error field if there are errors
+            if (errorDetails) {
+                embed.addFields({ name: '❌ Errors', value: errorDetails, inline: false });
+            }
 
             // Log to regear log channel if configured
             if (results.length > 0) {
