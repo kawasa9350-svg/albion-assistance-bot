@@ -450,7 +450,7 @@ module.exports = {
                 let stockLevel;
                 if (item.quantity === STOCK_LEVELS.OUT_OF_STOCK.threshold) {
                     stockLevel = `${STOCK_LEVELS.OUT_OF_STOCK.emoji} ${STOCK_LEVELS.OUT_OF_STOCK.label}`;
-                } else if (item.quantity === STOCK_LEVELS.CRITICAL.threshold) {
+                } else if (item.quantity <= STOCK_LEVELS.CRITICAL.threshold) {
                     stockLevel = `${STOCK_LEVELS.CRITICAL.emoji} ${STOCK_LEVELS.CRITICAL.label}`;
                 } else if (item.quantity <= STOCK_LEVELS.VERY_LOW.threshold) {
                     stockLevel = `${STOCK_LEVELS.VERY_LOW.emoji} ${STOCK_LEVELS.VERY_LOW.label}`;
