@@ -1,5 +1,16 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 
+// Stock threshold - items with quantity below this will show in /inventory stock
+const STOCK_THRESHOLD = 10;
+
+// Stock level indicators based on quantity
+const STOCK_LEVELS = {
+    OUT_OF_STOCK: { threshold: 0, emoji: '🔴', label: 'OUT OF STOCK' },
+    CRITICAL: { threshold: 5, emoji: '🟠', label: 'Critical' },
+    VERY_LOW: { threshold: 9, emoji: '🟡', label: 'Very Low' },
+    LOW: { threshold: null, emoji: '🟢', label: 'Low' } // Above 2
+};
+
 // Helper function to extract tier number for sorting (e.g., "T7" -> 7, "T8" -> 8)
 function getTierNumber(tierEquivalent) {
     const match = tierEquivalent.match(/^T?(\d+)$/i);
@@ -136,7 +147,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('stock')
-                .setDescription('Show items with low stock (less than 5)')
+                .setDescription(`Show items with low stock (less than ${STOCK_THRESHOLD})`)
                 .addStringOption(option =>
                     option.setName('tier')
                         .setDescription('Filter by tier (e.g., T7)')
@@ -392,14 +403,14 @@ module.exports = {
         // Get inventory items (filtered by tier if provided)
         const inventory = await db.getInventory(interaction.guildId, null, tierEquivalent);
 
-        // Filter items with quantity less than 5
-        const lowStockItems = inventory.filter(item => item.quantity < 5);
+        // Filter items with quantity less than threshold
+        const lowStockItems = inventory.filter(item => item.quantity < STOCK_THRESHOLD);
 
         if (lowStockItems.length === 0) {
             const embed = new EmbedBuilder()
                 .setColor('#00FF00')
                 .setTitle('✅ Stock Status')
-                .setDescription('All items have sufficient stock (5 or more)!')
+                .setDescription(`All items have sufficient stock (${STOCK_THRESHOLD} or more)!`)
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
@@ -419,9 +430,9 @@ module.exports = {
         });
 
         // Build description based on tier filter
-        let description = `Found ${lowStockItems.length} item(s) with less than 5 in stock:`;
+        let description = `Found ${lowStockItems.length} item(s) with less than ${STOCK_THRESHOLD} in stock:`;
         if (tierEquivalent) {
-            description = `Found ${lowStockItems.length} item(s) with less than 5 in stock (Tier ${tierEquivalent}):`;
+            description = `Found ${lowStockItems.length} item(s) with less than ${STOCK_THRESHOLD} in stock (Tier ${tierEquivalent}):`;
         }
         
         const embed = new EmbedBuilder()
@@ -436,9 +447,16 @@ module.exports = {
             let slotText = '';
             
             items.forEach(item => {
-                const stockLevel = item.quantity === 0 ? '🔴 OUT OF STOCK' : 
-                                  item.quantity === 1 ? '🟠 Critical' : 
-                                  item.quantity <= 2 ? '🟡 Very Low' : '🟢 Low';
+                let stockLevel;
+                if (item.quantity === STOCK_LEVELS.OUT_OF_STOCK.threshold) {
+                    stockLevel = `${STOCK_LEVELS.OUT_OF_STOCK.emoji} ${STOCK_LEVELS.OUT_OF_STOCK.label}`;
+                } else if (item.quantity === STOCK_LEVELS.CRITICAL.threshold) {
+                    stockLevel = `${STOCK_LEVELS.CRITICAL.emoji} ${STOCK_LEVELS.CRITICAL.label}`;
+                } else if (item.quantity <= STOCK_LEVELS.VERY_LOW.threshold) {
+                    stockLevel = `${STOCK_LEVELS.VERY_LOW.emoji} ${STOCK_LEVELS.VERY_LOW.label}`;
+                } else {
+                    stockLevel = `${STOCK_LEVELS.LOW.emoji} ${STOCK_LEVELS.LOW.label}`;
+                }
                 
                 slotText += `• **${item.name}** (${item.tierEquivalent}) - **${item.quantity}** ${stockLevel}`;
                 if (item.notes) {
