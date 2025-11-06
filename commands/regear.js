@@ -725,16 +725,31 @@ module.exports = {
         } else if (customId.startsWith('regear_confirm_pickup_')) {
             // Handle confirm pickup button
             const regearId = customId.replace('regear_confirm_pickup_', '');
+            console.log(`Confirm pickup button clicked for regearId: ${regearId}`);
+            if (!regearId || regearId.length === 0) {
+                await interaction.reply({ content: '❌ Invalid regear ID.', ephemeral: true });
+                return true;
+            }
             await this.handleConfirmPickup(interaction, db, regearId);
             return true;
         } else if (customId.startsWith('regear_cancel_reservation_')) {
             // Handle cancel reservation button
             const regearId = customId.replace('regear_cancel_reservation_', '');
+            console.log(`Cancel reservation button clicked for regearId: ${regearId}`);
+            if (!regearId || regearId.length === 0) {
+                await interaction.reply({ content: '❌ Invalid regear ID.', ephemeral: true });
+                return true;
+            }
             await this.handleCancelReservation(interaction, db, regearId);
             return true;
         } else if (customId.startsWith('regear_recipient_picked_up_')) {
             // Handle recipient picked up button (optional)
             const regearId = customId.replace('regear_recipient_picked_up_', '');
+            console.log(`Recipient picked up button clicked for regearId: ${regearId}`);
+            if (!regearId || regearId.length === 0) {
+                await interaction.reply({ content: '❌ Invalid regear ID.', ephemeral: true });
+                return true;
+            }
             await this.handleRecipientPickedUp(interaction, db, regearId);
             return true;
         }
@@ -864,98 +879,146 @@ module.exports = {
     },
 
     async handleConfirmPickup(interaction, db, regearId) {
-        await interaction.deferUpdate();
+        try {
+            // Defer the interaction first
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferUpdate();
+            }
 
-        const reservation = await db.getRegearReservation(interaction.guildId, regearId);
-        if (!reservation) {
-            await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
-            return;
-        }
-
-        // Check if user is the issuer
-        if (interaction.user.id !== reservation.issuerId) {
-            await interaction.followUp({ content: '❌ Only the issuer can confirm pickup.', ephemeral: true });
-            return;
-        }
-
-        // Check if already completed
-        if (reservation.status === 'COMPLETED') {
-            await interaction.followUp({ content: '❌ This reservation is already completed.', ephemeral: true });
-            return;
-        }
-
-        if (reservation.status === 'CANCELLED') {
-            await interaction.followUp({ content: '❌ This reservation was cancelled.', ephemeral: true });
-            return;
-        }
-
-        // Complete the reservation (remove items from inventory)
-        const completeResult = await db.completeRegearReservation(interaction.guildId, regearId);
-
-        if (!completeResult.success) {
-            await interaction.followUp({ content: `❌ Failed to complete reservation: ${completeResult.error}`, ephemeral: true });
-            return;
-        }
-
-        // Get updated reservation
-        const updatedReservation = await db.getRegearReservation(interaction.guildId, regearId);
-
-        // Build completed embed
-        const completedEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'COMPLETED');
-
-        // Update the message
-        await interaction.message.edit({ embeds: [completedEmbed], components: [] });
-
-        // Update recipient message if it exists (try in current channel first, then try DM)
-        if (reservation.recipientMessageId) {
-            try {
-                // Try to update in current channel first
-                const recipientMessage = await interaction.channel.messages.fetch(reservation.recipientMessageId).catch(() => null);
-                if (recipientMessage) {
-                    const recipientEmbed = new EmbedBuilder()
-                        .setColor('#00FF00')
-                        .setTitle('✅ Regear Completed')
-                        .setDescription('Your regear has been completed!')
-                        .addFields(
-                            { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
-                            { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
-                            { name: '📊 Status', value: '✅ COMPLETED', inline: true }
-                        )
-                        .setFooter({ text: 'Phoenix Assistance Bot' })
-                        .setTimestamp();
-                    await recipientMessage.edit({ embeds: [recipientEmbed], components: [] });
+            const reservation = await db.getRegearReservation(interaction.guildId, regearId);
+            if (!reservation) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
                 } else {
-                    // If not in current channel, it might be a DM - try to send a new DM
-                    try {
-                        const recipient = await interaction.client.users.fetch(reservation.recipientId).catch(() => null);
-                        if (recipient) {
-                            const recipientEmbed = new EmbedBuilder()
-                                .setColor('#00FF00')
-                                .setTitle('✅ Regear Completed')
-                                .setDescription('Your regear has been completed!')
-                                .addFields(
-                                    { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
-                                    { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
-                                    { name: '📊 Status', value: '✅ COMPLETED', inline: true }
-                                )
-                                .setFooter({ text: 'Phoenix Assistance Bot' })
-                                .setTimestamp();
-                            await recipient.send({ embeds: [recipientEmbed] });
-                        }
-                    } catch (dmError) {
-                        // DM update failed, that's okay
-                        console.log('Could not update recipient via DM');
-                    }
+                    await interaction.reply({ content: '❌ Reservation not found.', ephemeral: true });
                 }
-            } catch (error) {
-                console.error('Failed to update recipient message:', error);
+                return;
+            }
+
+            // Check if user is the issuer
+            if (interaction.user.id !== reservation.issuerId) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ Only the issuer can confirm pickup.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ Only the issuer can confirm pickup.', ephemeral: true });
+                }
+                return;
+            }
+
+            // Check if already completed
+            if (reservation.status === 'COMPLETED') {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ This reservation is already completed.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ This reservation is already completed.', ephemeral: true });
+                }
+                return;
+            }
+
+            if (reservation.status === 'CANCELLED') {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ This reservation was cancelled.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ This reservation was cancelled.', ephemeral: true });
+                }
+                return;
+            }
+
+            // Complete the reservation (remove items from inventory)
+            const completeResult = await db.completeRegearReservation(interaction.guildId, regearId);
+
+            if (!completeResult.success) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: `❌ Failed to complete reservation: ${completeResult.error}`, ephemeral: true });
+                } else {
+                    await interaction.reply({ content: `❌ Failed to complete reservation: ${completeResult.error}`, ephemeral: true });
+                }
+                return;
+            }
+
+            // Get updated reservation
+            const updatedReservation = await db.getRegearReservation(interaction.guildId, regearId);
+
+            // Build completed embed
+            const completedEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'COMPLETED');
+
+            // Update the message
+            try {
+                await interaction.message.edit({ embeds: [completedEmbed], components: [] });
+            } catch (editError) {
+                console.error('Failed to edit message:', editError);
+            }
+
+            // Update recipient message if it exists (try in current channel first, then try DM)
+            if (reservation.recipientMessageId) {
+                try {
+                    // Try to update in current channel first
+                    const recipientMessage = await interaction.channel.messages.fetch(reservation.recipientMessageId).catch(() => null);
+                    if (recipientMessage) {
+                        const recipientEmbed = new EmbedBuilder()
+                            .setColor('#00FF00')
+                            .setTitle('✅ Regear Completed')
+                            .setDescription('Your regear has been completed!')
+                            .addFields(
+                                { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
+                                { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
+                                { name: '📊 Status', value: '✅ COMPLETED', inline: true }
+                            )
+                            .setFooter({ text: 'Phoenix Assistance Bot' })
+                            .setTimestamp();
+                        await recipientMessage.edit({ embeds: [recipientEmbed], components: [] });
+                    } else {
+                        // If not in current channel, it might be a DM - try to send a new DM
+                        try {
+                            const recipient = await interaction.client.users.fetch(reservation.recipientId).catch(() => null);
+                            if (recipient) {
+                                const recipientEmbed = new EmbedBuilder()
+                                    .setColor('#00FF00')
+                                    .setTitle('✅ Regear Completed')
+                                    .setDescription('Your regear has been completed!')
+                                    .addFields(
+                                        { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
+                                        { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
+                                        { name: '📊 Status', value: '✅ COMPLETED', inline: true }
+                                    )
+                                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                                    .setTimestamp();
+                                await recipient.send({ embeds: [recipientEmbed] });
+                            }
+                        } catch (dmError) {
+                            // DM update failed, that's okay
+                            console.log('Could not update recipient via DM');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to update recipient message:', error);
+                }
+            }
+
+            // Log to channel
+            try {
+                await this.logRegearReservationToChannel(interaction, db, updatedReservation, 'COMPLETED', completeResult.results);
+            } catch (logError) {
+                console.error('Failed to log to channel:', logError);
+            }
+
+            if (interaction.deferred || interaction.replied) {
+                await interaction.followUp({ content: '✅ Regear completed successfully!', ephemeral: true });
+            } else {
+                await interaction.reply({ content: '✅ Regear completed successfully!', ephemeral: true });
+            }
+        } catch (error) {
+            console.error('Error in handleConfirmPickup:', error);
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ An error occurred while processing the pickup confirmation.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ An error occurred while processing the pickup confirmation.', ephemeral: true });
+                }
+            } catch (replyError) {
+                console.error('Failed to send error message:', replyError);
             }
         }
-
-        // Log to channel
-        await this.logRegearReservationToChannel(interaction, db, updatedReservation, 'COMPLETED', completeResult.results);
-
-        await interaction.followUp({ content: '✅ Regear completed successfully!', ephemeral: true });
     },
 
     async handleCancelReservation(interaction, db, regearId) {
