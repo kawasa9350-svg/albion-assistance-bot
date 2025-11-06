@@ -1266,6 +1266,33 @@ module.exports = {
                 console.error('Failed to log to channel:', logError);
             }
 
+            // Delete the log message from regear logs channel to reduce spam
+            if (reservation.logMessageId) {
+                try {
+                    const guildIdForLog = reservation.guildId || interaction.guildId;
+                    const logChannelId = await db.getRegearLogChannel(guildIdForLog);
+                    if (logChannelId) {
+                        const guild = interaction.guild || await interaction.client.guilds.fetch(guildIdForLog).catch(() => null);
+                        if (guild) {
+                            const logChannel = await guild.channels.fetch(logChannelId).catch(() => null);
+                            if (logChannel) {
+                                const logMessage = await logChannel.messages.fetch(reservation.logMessageId).catch(() => null);
+                                if (logMessage) {
+                                    await logMessage.delete().catch((err) => {
+                                        console.error(`Failed to delete log message ${reservation.logMessageId}:`, err);
+                                    });
+                                    console.log(`✅ Successfully deleted log message ${reservation.logMessageId} from regear logs channel after cancellation`);
+                                } else {
+                                    console.log(`⚠️ Log message ${reservation.logMessageId} not found (may have been already deleted)`);
+                                }
+                            }
+                        }
+                    }
+                } catch (deleteError) {
+                    console.error('Failed to delete log message:', deleteError);
+                }
+            }
+
             if (interaction.deferred || interaction.replied) {
                 await interaction.followUp({ content: '❌ Reservation cancelled.', ephemeral: true });
             } else {
