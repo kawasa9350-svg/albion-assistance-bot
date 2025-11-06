@@ -26,7 +26,8 @@ module.exports = {
                     { name: 'pay', value: 'pay' },
                     { name: 'balance', value: 'balance' },
                     { name: 'attendance', value: 'attendance' },
-                    { name: 'event', value: 'event' }
+                    { name: 'event', value: 'event' },
+                    { name: 'regear', value: 'regear' }
                 ))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
