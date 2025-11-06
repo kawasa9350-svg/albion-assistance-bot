@@ -704,8 +704,13 @@ module.exports = {
             // Send notification to recipient
             await this.sendRecipientNotification(interaction, db, reservationResult.reservation);
 
-            // Log to regear log channel if configured
-            await this.logRegearReservationToChannel(interaction, db, reservationResult.reservation, 'RESERVED');
+            // Log to regear log channel if configured and store the log message ID
+            const logMessageId = await this.logRegearReservationToChannel(interaction, db, reservationResult.reservation, 'RESERVED');
+            if (logMessageId) {
+                await db.updateRegearStatus(interaction.guildId, regearId, 'RESERVED', {
+                    logMessageId: logMessageId
+                });
+            }
 
             // Update original message to show it's reserved
             const reservedEmbed = new EmbedBuilder()
@@ -771,7 +776,7 @@ module.exports = {
         // Build items list
         let itemsText = '';
         reservation.items.forEach(item => {
-            let slotEmoji = '🎒';
+                    let slotEmoji = '🎒';
             if (item.slot === 'head') slotEmoji = '🪖';
             else if (item.slot === 'chest') slotEmoji = '🦺';
             else if (item.slot === 'shoes') slotEmoji = '👟';
@@ -828,7 +833,7 @@ module.exports = {
             const embed = new EmbedBuilder()
                 .setColor('#FFAA00')
                 .setTitle('🎒 Regear Ready for Pickup!')
-                .setDescription(`<@${reservation.recipientId}>, your regear has been reserved!`)
+                .setDescription(`<@${reservation.recipientId}>, your regear has been reserved!\n\n**📞 Please contact an officer to collect your regear.**`)
                 .addFields(
                     { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
                     { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
@@ -837,7 +842,7 @@ module.exports = {
                 )
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
-
+            
             // Create button for recipient to mark as picked up
             const recipientButtonRow = new ActionRowBuilder()
                 .addComponents(
@@ -859,7 +864,7 @@ module.exports = {
                 // If DM fails, mention in the channel where reservation was created
                 console.log(`⚠️ Could not send DM to ${recipient.tag}, will mention in channel`);
                 // Update embed to mention them
-                embed.setDescription(`<@${reservation.recipientId}>, your regear has been reserved!`);
+                embed.setDescription(`<@${reservation.recipientId}>, your regear has been reserved!\n\n**📞 Please contact an officer to collect your regear.**`);
                 try {
                     const channelMessage = await interaction.channel.send({ 
                         embeds: [embed], 
@@ -876,6 +881,51 @@ module.exports = {
             }
         } catch (error) {
             console.error('❌ Failed to send recipient notification:', error);
+        }
+    },
+
+    async deleteReservationMessage(client, reservation) {
+        try {
+            console.log(`Attempting to delete reservation message: ${reservation.reservationMessageId} from channel: ${reservation.reservationChannelId}`);
+            
+            const guild = await client.guilds.fetch(reservation.guildId).catch((err) => {
+                console.error(`Failed to fetch guild ${reservation.guildId}:`, err);
+                return null;
+            });
+            
+            if (!guild) {
+                console.error(`Guild ${reservation.guildId} not found`);
+                return false;
+            }
+            
+            const reservationChannel = await guild.channels.fetch(reservation.reservationChannelId).catch((err) => {
+                console.error(`Failed to fetch channel ${reservation.reservationChannelId}:`, err);
+                return null;
+            });
+            
+            if (!reservationChannel) {
+                console.error(`Channel ${reservation.reservationChannelId} not found`);
+                return false;
+            }
+            
+            const reservationMessage = await reservationChannel.messages.fetch(reservation.reservationMessageId).catch((err) => {
+                console.error(`Failed to fetch message ${reservation.reservationMessageId}:`, err);
+                return null;
+            });
+            
+            if (reservationMessage) {
+                await reservationMessage.delete().catch((err) => {
+                    console.error(`Failed to delete message ${reservation.reservationMessageId}:`, err);
+                });
+                console.log(`✅ Successfully deleted reservation message ${reservation.reservationMessageId} after completion`);
+                return true;
+            } else {
+                console.log(`⚠️ Reservation message ${reservation.reservationMessageId} not found (may have been already deleted)`);
+                return false;
+            }
+        } catch (error) {
+            console.error('Error in deleteReservationMessage:', error);
+            return false;
         }
     },
 
@@ -1025,16 +1075,16 @@ module.exports = {
                     const recipientMessage = await interaction.channel.messages.fetch(reservation.recipientMessageId).catch(() => null);
                     if (recipientMessage) {
                         const recipientEmbed = new EmbedBuilder()
-                            .setColor('#00FF00')
-                            .setTitle('✅ Regear Completed')
+                .setColor('#00FF00')
+                .setTitle('✅ Regear Completed')
                             .setDescription('Your regear has been completed!')
                             .addFields(
                                 { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
                                 { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
                                 { name: '📊 Status', value: '✅ COMPLETED', inline: true }
                             )
-                            .setFooter({ text: 'Phoenix Assistance Bot' })
-                            .setTimestamp();
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
                         await recipientMessage.edit({ embeds: [recipientEmbed], components: [] });
                     } else {
                         // If not in current channel, it might be a DM - try to send a new DM
@@ -1071,24 +1121,30 @@ module.exports = {
                 console.error('Failed to log to channel:', logError);
             }
 
-            // Delete the reservation message to reduce spam
-            if (reservation.reservationMessageId && reservation.reservationChannelId) {
+            // Delete the log message from regear logs channel to reduce spam
+            if (reservation.logMessageId) {
                 try {
-                    // Get the guild from the reservation
-                    const guild = await interaction.client.guilds.fetch(reservation.guildId).catch(() => null);
-                    if (guild) {
-                        const reservationChannel = await guild.channels.fetch(reservation.reservationChannelId).catch(() => null);
-                        if (reservationChannel) {
-                            const reservationMessage = await reservationChannel.messages.fetch(reservation.reservationMessageId).catch(() => null);
-                            if (reservationMessage) {
-                                await reservationMessage.delete().catch(() => null);
-                                console.log(`✅ Deleted reservation message ${reservation.reservationMessageId} after completion`);
+                    const guildId = reservation.guildId || interaction.guildId;
+                    const logChannelId = await db.getRegearLogChannel(guildId);
+                    if (logChannelId) {
+                        const guild = interaction.guild || await interaction.client.guilds.fetch(guildId).catch(() => null);
+                        if (guild) {
+                            const logChannel = await guild.channels.fetch(logChannelId).catch(() => null);
+                            if (logChannel) {
+                                const logMessage = await logChannel.messages.fetch(reservation.logMessageId).catch(() => null);
+                                if (logMessage) {
+                                    await logMessage.delete().catch((err) => {
+                                        console.error(`Failed to delete log message ${reservation.logMessageId}:`, err);
+                                    });
+                                    console.log(`✅ Successfully deleted log message ${reservation.logMessageId} from regear logs channel`);
+                                } else {
+                                    console.log(`⚠️ Log message ${reservation.logMessageId} not found (may have been already deleted)`);
+                                }
                             }
                         }
                     }
                 } catch (deleteError) {
-                    console.error('Failed to delete reservation message:', deleteError);
-                    // Don't fail the whole operation if message deletion fails
+                    console.error('Failed to delete log message:', deleteError);
                 }
             }
 
@@ -1115,7 +1171,7 @@ module.exports = {
         try {
             // Defer the interaction first
             if (!interaction.deferred && !interaction.replied) {
-                await interaction.deferUpdate();
+            await interaction.deferUpdate();
             }
 
             const reservation = await db.getRegearReservation(interaction.guildId, regearId);
@@ -1338,15 +1394,29 @@ module.exports = {
 
     async logRegearReservationToChannel(interaction, db, reservation, status, results = null) {
         try {
-            const logChannelId = await db.getRegearLogChannel(interaction.guildId);
-            if (!logChannelId) {
-                return; // No log channel configured
+            // Get guildId from reservation if interaction doesn't have it (for DM interactions)
+            const guildId = reservation.guildId || interaction.guildId;
+            if (!guildId) {
+                console.error('No guildId available for logging');
+                return null;
             }
 
-            const logChannel = await interaction.guild.channels.fetch(logChannelId);
+            const logChannelId = await db.getRegearLogChannel(guildId);
+            if (!logChannelId) {
+                return null; // No log channel configured
+            }
+
+            // Get guild to fetch channel
+            const guild = interaction.guild || await interaction.client.guilds.fetch(guildId).catch(() => null);
+            if (!guild) {
+                console.error(`Guild ${guildId} not found for logging`);
+                return null;
+            }
+
+            const logChannel = await guild.channels.fetch(logChannelId);
             if (!logChannel) {
-                console.error(`Regear log channel ${logChannelId} not found in guild ${interaction.guildId}`);
-                return;
+                console.error(`Regear log channel ${logChannelId} not found in guild ${guildId}`);
+                return null;
             }
 
             const statusEmoji = status === 'RESERVED' ? '🟡' : status === 'PICKED_UP' ? '🟢' : status === 'COMPLETED' ? '✅' : '❌';
@@ -1428,15 +1498,18 @@ module.exports = {
                     name: `regear_${Date.now()}.csv`
                 };
 
-                await logChannel.send({ 
+                const logMessage = await logChannel.send({ 
                     embeds: [logEmbed],
                     files: [csvAttachment]
                 });
+                return logMessage.id;
             } else {
-                await logChannel.send({ embeds: [logEmbed] });
+                const logMessage = await logChannel.send({ embeds: [logEmbed] });
+                return logMessage.id;
             }
         } catch (error) {
             console.error('Error logging regear reservation to channel:', error);
+            return null;
         }
     },
 
