@@ -623,10 +623,15 @@ module.exports = {
 
             // Check if any items are selected
             let hasSelections = false;
+            const items = [];
             for (const slot of VALID_SLOTS) {
                 if (selections[slot]) {
                     hasSelections = true;
-                    break;
+                    items.push({
+                        slot: slot,
+                        name: selections[slot].name,
+                        tierEquivalent: selections[slot].tierEquivalent
+                    });
                 }
             }
 
@@ -637,106 +642,79 @@ module.exports = {
 
             await interaction.deferUpdate();
 
-            // Process each selection (skip non-slot properties)
-            const results = [];
-            const errors = [];
-
-            for (const slot of VALID_SLOTS) {
-                const selection = selections[slot];
-                if (!selection) continue;
-                
-                const result = await db.removeGearFromInventory(
-                    interaction.guildId,
-                    selection.name,
-                    selection.slot,
-                    selection.tierEquivalent,
-                    1
-                );
-
-                if (result.success) {
-                    results.push({
-                        slot: slot,
-                        name: selection.name,
-                        tierEquivalent: selection.tierEquivalent,
-                        remainingQuantity: result.remainingQuantity
-                    });
-                } else {
-                    errors.push({
-                        slot: slot,
-                        name: selection.name,
-                        error: result.error
-                    });
-                }
-            }
-
             // Get tier, issuer, and recipient info
             const selectedTier = selections.selectedTier || 'Unknown';
             const issuer = interaction.user;
-            const issuerInfo = `<@${issuer.id}>`;
             const recipientId = selections.targetUserId || 'Unknown';
-            const recipientInfo = recipientId !== 'Unknown' ? `<@${recipientId}>` : 'Unknown';
-            
-            // Build regear details with emojis
-            let regearDetails = '';
-            if (results.length > 0) {
-                results.forEach(r => {
-                    // Add emoji based on slot type
-                    let slotEmoji = '🎒';
-                    if (r.slot === 'head') slotEmoji = '🪖';
-                    else if (r.slot === 'chest') slotEmoji = '🦺';
-                    else if (r.slot === 'shoes') slotEmoji = '👟';
-                    else if (r.slot === 'main-hand') slotEmoji = '⚔️';
-                    else if (r.slot === 'off-hand') slotEmoji = '🛡️';
-                    
-                    regearDetails += `${slotEmoji} **${formatSlotName(r.slot)}:** ${r.name} (${r.tierEquivalent})\n`;
-                });
-            } else {
-                regearDetails = 'No items were processed.';
-            }
-            
-            // Build error details if any
-            let errorDetails = '';
-            if (errors.length > 0) {
-                errorDetails += '\n**❌ Errors:**\n';
-                errors.forEach(e => {
-                    errorDetails += `• **${formatSlotName(e.slot)}:** ${e.name} - ${e.error}\n`;
-                });
+            const recipientTag = selections.targetUserTag || 'Unknown';
+
+            // Create reservation
+            const reservationResult = await db.createRegearReservation(interaction.guildId, {
+                issuerId: issuer.id,
+                issuerTag: issuer.tag,
+                recipientId: recipientId,
+                recipientTag: recipientTag,
+                items: items,
+                selectedTier: selectedTier
+            });
+
+            if (!reservationResult.success) {
+                const errorEmbed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Error')
+                    .setDescription(`Failed to create reservation: ${reservationResult.error}`)
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                await interaction.followUp({ embeds: [errorEmbed], ephemeral: true });
+                return true;
             }
 
-            const embed = new EmbedBuilder()
-                .setColor(errors.length > 0 ? '#FFAA00' : '#00FF00')
-                .setTitle(errors.length > 0 ? '⚠️ Regear Partially Completed' : '✅ Regear Completed')
-                .addFields(
-                    { name: '👤 Issued By', value: issuerInfo, inline: true },
-                    { name: '🎯 Recipient', value: recipientInfo, inline: true },
-                    { name: '⚡ Tier', value: selectedTier, inline: true },
-                    { name: '🎒 Regear Details', value: regearDetails || 'No items', inline: false }
-                )
-                .setFooter({ text: 'Phoenix Assistance Bot' })
-                .setTimestamp();
+            const regearId = reservationResult.regearId;
+
+            // Build reservation embed for issuer
+            const reservationEmbed = await this.buildReservationEmbed(interaction, db, reservationResult.reservation, 'RESERVED');
             
-            // Add error field if there are errors
-            if (errorDetails) {
-                embed.addFields({ name: '❌ Errors', value: errorDetails, inline: false });
-            }
+            // Create buttons for issuer
+            const buttonRow = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`regear_confirm_pickup_${regearId}`)
+                        .setLabel('✅ Confirm Pickup')
+                        .setStyle(ButtonStyle.Success),
+                    new ButtonBuilder()
+                        .setCustomId(`regear_cancel_reservation_${regearId}`)
+                        .setLabel('❌ Cancel Reservation')
+                        .setStyle(ButtonStyle.Danger)
+                );
+
+            // Send reservation message
+            const reservationMessage = await interaction.followUp({ 
+                embeds: [reservationEmbed], 
+                components: [buttonRow],
+                ephemeral: false 
+            });
+
+            // Update reservation with message ID
+            await db.updateRegearStatus(interaction.guildId, regearId, 'RESERVED', {
+                reservationMessageId: reservationMessage.id
+            });
+
+            // Send notification to recipient
+            await this.sendRecipientNotification(interaction, db, reservationResult.reservation);
 
             // Log to regear log channel if configured
-            if (results.length > 0) {
-                await this.logRegearToChannel(interaction, db, selections, results);
-            }
+            await this.logRegearReservationToChannel(interaction, db, reservationResult.reservation, 'RESERVED');
 
-            // Send final confirmation as a public follow-up message
-            await interaction.followUp({ embeds: [embed], ephemeral: false });
-            
-            // Update original message to show it's completed (keep minimal content to avoid empty message error)
-            const completedEmbed = new EmbedBuilder()
-                .setColor('#00FF00')
-                .setTitle('✅ Regear Completed')
-                .setDescription('The regear has been successfully processed. See the message above for details.')
+            // Update original message to show it's reserved
+            const reservedEmbed = new EmbedBuilder()
+                .setColor('#FFAA00')
+                .setTitle('🟡 Regear Reserved')
+                .setDescription('Items have been reserved. See the message above for details.')
                 .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
             
-            await interaction.editReply({ embeds: [completedEmbed], components: [] });
+            await interaction.editReply({ embeds: [reservedEmbed], components: [] });
             return true;
         } else if (customId === 'regear_cancel') {
             await interaction.deferUpdate();
@@ -744,9 +722,454 @@ module.exports = {
             // Reset to initial state (page 1)
             await this.showRegearMenu(interaction, db, {});
             return true;
+        } else if (customId.startsWith('regear_confirm_pickup_')) {
+            // Handle confirm pickup button
+            const regearId = customId.replace('regear_confirm_pickup_', '');
+            await this.handleConfirmPickup(interaction, db, regearId);
+            return true;
+        } else if (customId.startsWith('regear_cancel_reservation_')) {
+            // Handle cancel reservation button
+            const regearId = customId.replace('regear_cancel_reservation_', '');
+            await this.handleCancelReservation(interaction, db, regearId);
+            return true;
+        } else if (customId.startsWith('regear_recipient_picked_up_')) {
+            // Handle recipient picked up button (optional)
+            const regearId = customId.replace('regear_recipient_picked_up_', '');
+            await this.handleRecipientPickedUp(interaction, db, regearId);
+            return true;
         }
 
         return false;
+    },
+
+    async buildReservationEmbed(interaction, db, reservation, status) {
+        const statusEmoji = status === 'RESERVED' ? '🟡' : status === 'PICKED_UP' ? '🟢' : status === 'COMPLETED' ? '✅' : '❌';
+        const statusText = status === 'RESERVED' ? 'RESERVED - Waiting for pickup' : 
+                          status === 'PICKED_UP' ? 'PICKED UP - Awaiting confirmation' :
+                          status === 'COMPLETED' ? 'COMPLETED' : 'CANCELLED';
+        const color = status === 'RESERVED' ? '#FFAA00' : status === 'PICKED_UP' ? '#00AA00' : status === 'COMPLETED' ? '#00FF00' : '#FF0000';
+        const title = status === 'RESERVED' ? '🟡 Regear Reserved' : 
+                     status === 'PICKED_UP' ? '🟢 Regear Picked Up' :
+                     status === 'COMPLETED' ? '✅ Regear Completed' : '❌ Regear Cancelled';
+
+        // Build items list
+        let itemsText = '';
+        reservation.items.forEach(item => {
+            let slotEmoji = '🎒';
+            if (item.slot === 'head') slotEmoji = '🪖';
+            else if (item.slot === 'chest') slotEmoji = '🦺';
+            else if (item.slot === 'shoes') slotEmoji = '👟';
+            else if (item.slot === 'main-hand') slotEmoji = '⚔️';
+            else if (item.slot === 'off-hand') slotEmoji = '🛡️';
+            
+            itemsText += `${slotEmoji} **${formatSlotName(item.slot)}:** ${item.name} (${item.tierEquivalent})\n`;
+        });
+
+        const embed = new EmbedBuilder()
+            .setColor(color)
+            .setTitle(title)
+            .setDescription(status === 'RESERVED' ? '✅ Items have been reserved for pickup' :
+                           status === 'PICKED_UP' ? '🟢 Recipient has picked up items. Confirm to complete.' :
+                           status === 'COMPLETED' ? '✅ Items have been removed from inventory' :
+                           '❌ Reservation has been cancelled')
+            .addFields(
+                { name: '👤 Recipient', value: `<@${reservation.recipientId}>`, inline: true },
+                { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
+                { name: '📊 Status', value: `${statusEmoji} ${statusText}`, inline: true },
+                { name: '🎒 Reserved Items', value: itemsText || 'No items', inline: false }
+            )
+            .setFooter({ text: 'Phoenix Assistance Bot' })
+            .setTimestamp(reservation.reservedAt || new Date());
+
+        if (reservation.completedAt) {
+            embed.addFields({ name: '📅 Completed', value: `<t:${Math.floor(reservation.completedAt.getTime() / 1000)}:R>`, inline: true });
+        }
+
+        return embed;
+    },
+
+    async sendRecipientNotification(interaction, db, reservation) {
+        try {
+            const recipient = await interaction.client.users.fetch(reservation.recipientId).catch(() => null);
+            if (!recipient) {
+                console.error(`Failed to fetch recipient user: ${reservation.recipientId}`);
+                return;
+            }
+
+            // Build items list
+            let itemsText = '';
+            reservation.items.forEach(item => {
+                let slotEmoji = '🎒';
+                if (item.slot === 'head') slotEmoji = '🪖';
+                else if (item.slot === 'chest') slotEmoji = '🦺';
+                else if (item.slot === 'shoes') slotEmoji = '👟';
+                else if (item.slot === 'main-hand') slotEmoji = '⚔️';
+                else if (item.slot === 'off-hand') slotEmoji = '🛡️';
+                
+                itemsText += `${slotEmoji} **${formatSlotName(item.slot)}:** ${item.name} (${item.tierEquivalent})\n`;
+            });
+
+            const embed = new EmbedBuilder()
+                .setColor('#FFAA00')
+                .setTitle('🎒 Regear Ready for Pickup!')
+                .setDescription(`<@${reservation.recipientId}>, your regear has been reserved!`)
+                .addFields(
+                    { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
+                    { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
+                    { name: '📊 Status', value: '🟡 Ready for Pickup', inline: true },
+                    { name: '🎒 Your Reserved Items', value: itemsText || 'No items', inline: false }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            // Create button for recipient to mark as picked up
+            const recipientButtonRow = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`regear_recipient_picked_up_${reservation.regearId}`)
+                        .setLabel('✅ I\'ve Picked Up')
+                        .setStyle(ButtonStyle.Success)
+                );
+
+            // Try to send DM, fallback to mentioning in channel
+            try {
+                const dmMessage = await recipient.send({ embeds: [embed], components: [recipientButtonRow] });
+                // Store recipient message ID
+                await db.updateRegearStatus(interaction.guildId, reservation.regearId, 'RESERVED', {
+                    recipientMessageId: dmMessage.id
+                });
+                console.log(`✅ Sent regear notification DM to ${recipient.tag}`);
+            } catch (dmError) {
+                // If DM fails, mention in the channel where reservation was created
+                console.log(`⚠️ Could not send DM to ${recipient.tag}, will mention in channel`);
+                // Update embed to mention them
+                embed.setDescription(`<@${reservation.recipientId}>, your regear has been reserved!`);
+                try {
+                    const channelMessage = await interaction.channel.send({ 
+                        embeds: [embed], 
+                        components: [recipientButtonRow],
+                        content: `<@${reservation.recipientId}>`
+                    });
+                    // Store recipient message ID
+                    await db.updateRegearStatus(interaction.guildId, reservation.regearId, 'RESERVED', {
+                        recipientMessageId: channelMessage.id
+                    });
+                } catch (channelError) {
+                    console.error('Failed to send channel message:', channelError);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Failed to send recipient notification:', error);
+        }
+    },
+
+    async handleConfirmPickup(interaction, db, regearId) {
+        await interaction.deferUpdate();
+
+        const reservation = await db.getRegearReservation(interaction.guildId, regearId);
+        if (!reservation) {
+            await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
+            return;
+        }
+
+        // Check if user is the issuer
+        if (interaction.user.id !== reservation.issuerId) {
+            await interaction.followUp({ content: '❌ Only the issuer can confirm pickup.', ephemeral: true });
+            return;
+        }
+
+        // Check if already completed
+        if (reservation.status === 'COMPLETED') {
+            await interaction.followUp({ content: '❌ This reservation is already completed.', ephemeral: true });
+            return;
+        }
+
+        if (reservation.status === 'CANCELLED') {
+            await interaction.followUp({ content: '❌ This reservation was cancelled.', ephemeral: true });
+            return;
+        }
+
+        // Complete the reservation (remove items from inventory)
+        const completeResult = await db.completeRegearReservation(interaction.guildId, regearId);
+
+        if (!completeResult.success) {
+            await interaction.followUp({ content: `❌ Failed to complete reservation: ${completeResult.error}`, ephemeral: true });
+            return;
+        }
+
+        // Get updated reservation
+        const updatedReservation = await db.getRegearReservation(interaction.guildId, regearId);
+
+        // Build completed embed
+        const completedEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'COMPLETED');
+
+        // Update the message
+        await interaction.message.edit({ embeds: [completedEmbed], components: [] });
+
+        // Update recipient message if it exists (try in current channel first, then try DM)
+        if (reservation.recipientMessageId) {
+            try {
+                // Try to update in current channel first
+                const recipientMessage = await interaction.channel.messages.fetch(reservation.recipientMessageId).catch(() => null);
+                if (recipientMessage) {
+                    const recipientEmbed = new EmbedBuilder()
+                        .setColor('#00FF00')
+                        .setTitle('✅ Regear Completed')
+                        .setDescription('Your regear has been completed!')
+                        .addFields(
+                            { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
+                            { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
+                            { name: '📊 Status', value: '✅ COMPLETED', inline: true }
+                        )
+                        .setFooter({ text: 'Phoenix Assistance Bot' })
+                        .setTimestamp();
+                    await recipientMessage.edit({ embeds: [recipientEmbed], components: [] });
+                } else {
+                    // If not in current channel, it might be a DM - try to send a new DM
+                    try {
+                        const recipient = await interaction.client.users.fetch(reservation.recipientId).catch(() => null);
+                        if (recipient) {
+                            const recipientEmbed = new EmbedBuilder()
+                                .setColor('#00FF00')
+                                .setTitle('✅ Regear Completed')
+                                .setDescription('Your regear has been completed!')
+                                .addFields(
+                                    { name: '👤 Issued by', value: `<@${reservation.issuerId}>`, inline: true },
+                                    { name: '⚡ Tier', value: reservation.selectedTier || 'Unknown', inline: true },
+                                    { name: '📊 Status', value: '✅ COMPLETED', inline: true }
+                                )
+                                .setFooter({ text: 'Phoenix Assistance Bot' })
+                                .setTimestamp();
+                            await recipient.send({ embeds: [recipientEmbed] });
+                        }
+                    } catch (dmError) {
+                        // DM update failed, that's okay
+                        console.log('Could not update recipient via DM');
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to update recipient message:', error);
+            }
+        }
+
+        // Log to channel
+        await this.logRegearReservationToChannel(interaction, db, updatedReservation, 'COMPLETED', completeResult.results);
+
+        await interaction.followUp({ content: '✅ Regear completed successfully!', ephemeral: true });
+    },
+
+    async handleCancelReservation(interaction, db, regearId) {
+        await interaction.deferUpdate();
+
+        const reservation = await db.getRegearReservation(interaction.guildId, regearId);
+        if (!reservation) {
+            await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
+            return;
+        }
+
+        // Check if user is the issuer
+        if (interaction.user.id !== reservation.issuerId) {
+            await interaction.followUp({ content: '❌ Only the issuer can cancel this reservation.', ephemeral: true });
+            return;
+        }
+
+        // Check if already completed
+        if (reservation.status === 'COMPLETED') {
+            await interaction.followUp({ content: '❌ Cannot cancel a completed reservation.', ephemeral: true });
+            return;
+        }
+
+        if (reservation.status === 'CANCELLED') {
+            await interaction.followUp({ content: '❌ This reservation is already cancelled.', ephemeral: true });
+            return;
+        }
+
+        // Cancel the reservation
+        const cancelResult = await db.cancelRegearReservation(interaction.guildId, regearId);
+
+        if (!cancelResult.success) {
+            await interaction.followUp({ content: `❌ Failed to cancel reservation: ${cancelResult.error}`, ephemeral: true });
+            return;
+        }
+
+        // Get updated reservation
+        const updatedReservation = await db.getRegearReservation(interaction.guildId, regearId);
+
+        // Build cancelled embed
+        const cancelledEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'CANCELLED');
+
+        // Update the message
+        await interaction.message.edit({ embeds: [cancelledEmbed], components: [] });
+
+        // Log to channel
+        await this.logRegearReservationToChannel(interaction, db, updatedReservation, 'CANCELLED');
+
+        await interaction.followUp({ content: '❌ Reservation cancelled.', ephemeral: true });
+    },
+
+    async handleRecipientPickedUp(interaction, db, regearId) {
+        await interaction.deferUpdate();
+
+        const reservation = await db.getRegearReservation(interaction.guildId, regearId);
+        if (!reservation) {
+            await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
+            return;
+        }
+
+        // Check if user is the recipient
+        if (interaction.user.id !== reservation.recipientId) {
+            await interaction.followUp({ content: '❌ Only the recipient can mark items as picked up.', ephemeral: true });
+            return;
+        }
+
+        // Check if already completed or cancelled
+        if (reservation.status === 'COMPLETED' || reservation.status === 'CANCELLED') {
+            await interaction.followUp({ content: `❌ This reservation is already ${reservation.status.toLowerCase()}.`, ephemeral: true });
+            return;
+        }
+
+        // Update status to PICKED_UP
+        await db.updateRegearStatus(interaction.guildId, regearId, 'PICKED_UP');
+
+        // Get updated reservation
+        const updatedReservation = await db.getRegearReservation(interaction.guildId, regearId);
+
+        // Build picked up embed
+        const pickedUpEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'PICKED_UP');
+
+        // Update the message
+        await interaction.message.edit({ embeds: [pickedUpEmbed], components: [] });
+
+        // Update issuer's message if it exists
+        if (reservation.reservationMessageId) {
+            try {
+                const issuerChannel = await interaction.channel.fetch();
+                const issuerMessage = await issuerChannel.messages.fetch(reservation.reservationMessageId).catch(() => null);
+                if (issuerMessage) {
+                    const issuerEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'PICKED_UP');
+                    const buttonRow = new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`regear_confirm_pickup_${regearId}`)
+                                .setLabel('✅ Confirm Pickup')
+                                .setStyle(ButtonStyle.Success),
+                            new ButtonBuilder()
+                                .setCustomId(`regear_cancel_reservation_${regearId}`)
+                                .setLabel('❌ Cancel Reservation')
+                                .setStyle(ButtonStyle.Danger)
+                        );
+                    await issuerMessage.edit({ embeds: [issuerEmbed], components: [buttonRow] });
+                }
+            } catch (error) {
+                console.error('Failed to update issuer message:', error);
+            }
+        }
+
+        await interaction.followUp({ content: '✅ You\'ve marked items as picked up. Waiting for issuer confirmation.', ephemeral: true });
+    },
+
+    async logRegearReservationToChannel(interaction, db, reservation, status, results = null) {
+        try {
+            const logChannelId = await db.getRegearLogChannel(interaction.guildId);
+            if (!logChannelId) {
+                return; // No log channel configured
+            }
+
+            const logChannel = await interaction.guild.channels.fetch(logChannelId);
+            if (!logChannel) {
+                console.error(`Regear log channel ${logChannelId} not found in guild ${interaction.guildId}`);
+                return;
+            }
+
+            const statusEmoji = status === 'RESERVED' ? '🟡' : status === 'PICKED_UP' ? '🟢' : status === 'COMPLETED' ? '✅' : '❌';
+            const statusText = status === 'RESERVED' ? 'RESERVED' : status === 'PICKED_UP' ? 'PICKED UP' : status === 'COMPLETED' ? 'COMPLETED' : 'CANCELLED';
+            const color = status === 'RESERVED' ? '#FFAA00' : status === 'PICKED_UP' ? '#00AA00' : status === 'COMPLETED' ? '#00FF00' : '#FF0000';
+
+            // Build regear details
+            let regearDetails = '';
+            const itemsToShow = results || reservation.items;
+            for (const item of itemsToShow) {
+                regearDetails += `• **${formatSlotName(item.slot)}:** ${item.name} (${item.tierEquivalent})\n`;
+            }
+
+            const logEmbed = new EmbedBuilder()
+                .setColor(color)
+                .setTitle(`🎒 Regear ${statusText}`)
+                .addFields(
+                    { name: 'Issued By', value: `<@${reservation.issuerId}>`, inline: true },
+                    { name: 'Recipient', value: `<@${reservation.recipientId}>`, inline: true },
+                    { name: 'Tier', value: reservation.selectedTier || 'Unknown', inline: true },
+                    { name: 'Status', value: `${statusEmoji} ${statusText}`, inline: true },
+                    { name: 'Regear Details', value: regearDetails || 'No items', inline: false }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            if (reservation.completedAt) {
+                logEmbed.addFields({ name: 'Completed', value: `<t:${Math.floor(reservation.completedAt.getTime() / 1000)}:R>`, inline: true });
+            }
+
+            // Build CSV if completed
+            if (status === 'COMPLETED' && results) {
+                const date = new Date().toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: '2-digit', 
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                
+                const gearBySlot = {
+                    'main-hand': '',
+                    'off-hand': '',
+                    'head': '',
+                    'chest': '',
+                    'shoes': ''
+                };
+                
+                for (const item of results) {
+                    const gearName = `${item.name} (${item.tierEquivalent})`;
+                    gearBySlot[item.slot] = gearName;
+                }
+
+                const escapeCSV = (value) => {
+                    if (!value) return '';
+                    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                        return `"${value.replace(/"/g, '""')}"`;
+                    }
+                    return value;
+                };
+                
+                const csvRow = [
+                    date,
+                    escapeCSV(reservation.recipientTag),
+                    escapeCSV(gearBySlot['main-hand'] || ''),
+                    escapeCSV(gearBySlot['off-hand'] || ''),
+                    escapeCSV(gearBySlot['head'] || ''),
+                    escapeCSV(gearBySlot['chest'] || ''),
+                    escapeCSV(gearBySlot['shoes'] || ''),
+                    escapeCSV(reservation.selectedTier),
+                    escapeCSV(reservation.issuerTag)
+                ].join(',');
+
+                const csvContent = csvRow + '\n';
+                const csvBuffer = Buffer.from(csvContent, 'utf-8');
+                
+                const csvAttachment = {
+                    attachment: csvBuffer,
+                    name: `regear_${Date.now()}.csv`
+                };
+
+                await logChannel.send({ 
+                    embeds: [logEmbed],
+                    files: [csvAttachment]
+                });
+            } else {
+                await logChannel.send({ embeds: [logEmbed] });
+            }
+        } catch (error) {
+            console.error('Error logging regear reservation to channel:', error);
+        }
     },
 
     async logRegearToChannel(interaction, db, selections, results) {

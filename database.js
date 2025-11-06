@@ -1703,6 +1703,194 @@ class DatabaseManager {
             return null;
         }
     }
+
+    // Regear Reservation Functions
+    async createRegearReservation(guildId, reservationData) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const regearId = `regear_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            const reservation = {
+                regearId: regearId,
+                guildId: guildId,
+                type: 'regear_reservation',
+                status: 'RESERVED',
+                issuerId: reservationData.issuerId,
+                issuerTag: reservationData.issuerTag,
+                recipientId: reservationData.recipientId,
+                recipientTag: reservationData.recipientTag,
+                items: reservationData.items,
+                selectedTier: reservationData.selectedTier,
+                createdAt: new Date(),
+                reservedAt: new Date(),
+                pickedUpAt: null,
+                completedAt: null,
+                reservationMessageId: reservationData.reservationMessageId || null,
+                recipientMessageId: reservationData.recipientMessageId || null,
+                logMessageId: reservationData.logMessageId || null
+            };
+
+            await collection.insertOne(reservation);
+            console.log(`✅ Created regear reservation: ${regearId} for guild ${guildId}`);
+            return { success: true, regearId: regearId, reservation: reservation };
+        } catch (error) {
+            console.error('❌ Failed to create regear reservation:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getRegearReservation(guildId, regearId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const reservation = await collection.findOne({
+                guildId: guildId,
+                type: 'regear_reservation',
+                regearId: regearId
+            });
+            return reservation;
+        } catch (error) {
+            console.error('❌ Failed to get regear reservation:', error);
+            return null;
+        }
+    }
+
+    async updateRegearStatus(guildId, regearId, newStatus, additionalData = {}) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const updateData = { 
+                status: newStatus,
+                ...additionalData
+            };
+
+            if (newStatus === 'PICKED_UP' && !additionalData.pickedUpAt) {
+                updateData.pickedUpAt = new Date();
+            } else if (newStatus === 'COMPLETED' && !additionalData.completedAt) {
+                updateData.completedAt = new Date();
+            }
+
+            const result = await collection.updateOne(
+                {
+                    guildId: guildId,
+                    type: 'regear_reservation',
+                    regearId: regearId
+                },
+                { $set: updateData }
+            );
+
+            if (result.modifiedCount > 0) {
+                console.log(`✅ Updated regear reservation ${regearId} to status: ${newStatus}`);
+                return { success: true };
+            } else {
+                console.log(`⚠️ Regear reservation ${regearId} not found or already updated`);
+                return { success: false, error: 'Reservation not found' };
+            }
+        } catch (error) {
+            console.error('❌ Failed to update regear status:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async completeRegearReservation(guildId, regearId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const reservation = await this.getRegearReservation(guildId, regearId);
+
+            if (!reservation) {
+                return { success: false, error: 'Reservation not found' };
+            }
+
+            if (reservation.status === 'COMPLETED') {
+                return { success: false, error: 'Reservation already completed' };
+            }
+
+            if (reservation.status === 'CANCELLED') {
+                return { success: false, error: 'Reservation was cancelled' };
+            }
+
+            // Remove items from inventory
+            const results = [];
+            const errors = [];
+
+            for (const item of reservation.items) {
+                const result = await this.removeGearFromInventory(
+                    guildId,
+                    item.name,
+                    item.slot,
+                    item.tierEquivalent,
+                    1
+                );
+
+                if (result.success) {
+                    results.push({
+                        slot: item.slot,
+                        name: item.name,
+                        tierEquivalent: item.tierEquivalent,
+                        remainingQuantity: result.remainingQuantity
+                    });
+                } else {
+                    errors.push({
+                        slot: item.slot,
+                        name: item.name,
+                        error: result.error
+                    });
+                }
+            }
+
+            // Update reservation status
+            await this.updateRegearStatus(guildId, regearId, 'COMPLETED');
+
+            console.log(`✅ Completed regear reservation: ${regearId}`);
+            return { success: true, results: results, errors: errors };
+        } catch (error) {
+            console.error('❌ Failed to complete regear reservation:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async cancelRegearReservation(guildId, regearId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const reservation = await this.getRegearReservation(guildId, regearId);
+
+            if (!reservation) {
+                return { success: false, error: 'Reservation not found' };
+            }
+
+            if (reservation.status === 'COMPLETED') {
+                return { success: false, error: 'Cannot cancel completed reservation' };
+            }
+
+            if (reservation.status === 'CANCELLED') {
+                return { success: true, message: 'Already cancelled' };
+            }
+
+            // Update status to cancelled (items are already reserved, so we just mark as cancelled)
+            await this.updateRegearStatus(guildId, regearId, 'CANCELLED');
+
+            console.log(`✅ Cancelled regear reservation: ${regearId}`);
+            return { success: true };
+        } catch (error) {
+            console.error('❌ Failed to cancel regear reservation:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    async getPendingRegearsForUser(guildId, userId) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            const reservations = await collection.find({
+                guildId: guildId,
+                type: 'regear_reservation',
+                recipientId: userId,
+                status: { $in: ['RESERVED', 'PICKED_UP'] }
+            }).toArray();
+
+            return reservations;
+        } catch (error) {
+            console.error('❌ Failed to get pending regears for user:', error);
+            return [];
+        }
+    }
 }
 
 module.exports = DatabaseManager;
