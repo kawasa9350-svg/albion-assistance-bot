@@ -695,9 +695,10 @@ module.exports = {
                 ephemeral: false 
             });
 
-            // Update reservation with message ID
+            // Update reservation with message ID and channel ID
             await db.updateRegearStatus(interaction.guildId, regearId, 'RESERVED', {
-                reservationMessageId: reservationMessage.id
+                reservationMessageId: reservationMessage.id,
+                reservationChannelId: interaction.channel.id
             });
 
             // Send notification to recipient
@@ -878,6 +879,53 @@ module.exports = {
         }
     },
 
+    async checkRegearPermission(interaction, db, guildId) {
+        // If in DM, we can't check permissions properly - deny access
+        // These buttons should only be used in guild channels
+        if (!interaction.guild || !interaction.member) {
+            console.log(`Permission check failed: Not in guild context for user ${interaction.user.id}`);
+            return false;
+        }
+
+        const member = interaction.member;
+        let hasPermission = false;
+        
+        // Check if user is admin
+        if (member.permissions.has('Administrator')) {
+            hasPermission = true;
+            console.log(`User ${interaction.user.id} has Administrator permission for regear`);
+        } else {
+            // Check if user has regear permission directly
+            try {
+                const userHasPermission = await db.hasPermission(guildId, member.id, 'regear');
+                if (userHasPermission) {
+                    hasPermission = true;
+                    console.log(`User ${interaction.user.id} has direct regear permission`);
+                }
+            } catch (error) {
+                console.error('Error checking user permission:', error);
+            }
+            
+            // Check if any of user's roles have regear permission
+            if (!hasPermission) {
+                for (const role of member.roles.cache.values()) {
+                    try {
+                        const roleHasPermission = await db.hasPermission(guildId, role.id, 'regear');
+                        if (roleHasPermission) {
+                            hasPermission = true;
+                            console.log(`User ${interaction.user.id} has regear permission through role: ${role.name}`);
+                            break;
+                        }
+                    } catch (error) {
+                        console.error(`Error checking role ${role.id} permission:`, error);
+                    }
+                }
+            }
+        }
+
+        return hasPermission;
+    },
+
     async handleConfirmPickup(interaction, db, regearId) {
         try {
             // Defer the interaction first
@@ -895,7 +943,28 @@ module.exports = {
                 return;
             }
 
-            // Check if user is the issuer
+            // Get guildId from reservation if needed (for DM interactions)
+            const guildId = reservation.guildId || interaction.guildId;
+
+            // Check if user has regear permission
+            const hasPermission = await this.checkRegearPermission(interaction, db, guildId);
+            if (!hasPermission) {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Permission Denied')
+                    .setDescription('You do not have permission to confirm regear pickups.\n\n**Required:** Administrator role or regear permission')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ embeds: [embed], ephemeral: true });
+                } else {
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                }
+                return;
+            }
+
+            // Check if user is the issuer (additional check)
             if (interaction.user.id !== reservation.issuerId) {
                 if (interaction.deferred || interaction.replied) {
                     await interaction.followUp({ content: '❌ Only the issuer can confirm pickup.', ephemeral: true });
@@ -1002,6 +1071,27 @@ module.exports = {
                 console.error('Failed to log to channel:', logError);
             }
 
+            // Delete the reservation message to reduce spam
+            if (reservation.reservationMessageId && reservation.reservationChannelId) {
+                try {
+                    // Get the guild from the reservation
+                    const guild = await interaction.client.guilds.fetch(reservation.guildId).catch(() => null);
+                    if (guild) {
+                        const reservationChannel = await guild.channels.fetch(reservation.reservationChannelId).catch(() => null);
+                        if (reservationChannel) {
+                            const reservationMessage = await reservationChannel.messages.fetch(reservation.reservationMessageId).catch(() => null);
+                            if (reservationMessage) {
+                                await reservationMessage.delete().catch(() => null);
+                                console.log(`✅ Deleted reservation message ${reservation.reservationMessageId} after completion`);
+                            }
+                        }
+                    }
+                } catch (deleteError) {
+                    console.error('Failed to delete reservation message:', deleteError);
+                    // Don't fail the whole operation if message deletion fails
+                }
+            }
+
             if (interaction.deferred || interaction.replied) {
                 await interaction.followUp({ content: '✅ Regear completed successfully!', ephemeral: true });
             } else {
@@ -1022,113 +1112,228 @@ module.exports = {
     },
 
     async handleCancelReservation(interaction, db, regearId) {
-        await interaction.deferUpdate();
+        try {
+            // Defer the interaction first
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferUpdate();
+            }
 
-        const reservation = await db.getRegearReservation(interaction.guildId, regearId);
-        if (!reservation) {
-            await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
-            return;
+            const reservation = await db.getRegearReservation(interaction.guildId, regearId);
+            if (!reservation) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ Reservation not found.', ephemeral: true });
+                }
+                return;
+            }
+
+            // Get guildId from reservation if needed (for DM interactions)
+            const guildId = reservation.guildId || interaction.guildId;
+
+            // Check if user has regear permission
+            const hasPermission = await this.checkRegearPermission(interaction, db, guildId);
+            if (!hasPermission) {
+                const embed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Permission Denied')
+                    .setDescription('You do not have permission to cancel regear reservations.\n\n**Required:** Administrator role or regear permission')
+                    .setFooter({ text: 'Phoenix Assistance Bot' })
+                    .setTimestamp();
+                
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ embeds: [embed], ephemeral: true });
+                } else {
+                    await interaction.reply({ embeds: [embed], ephemeral: true });
+                }
+                return;
+            }
+
+            // Check if user is the issuer (additional check)
+            if (interaction.user.id !== reservation.issuerId) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ Only the issuer can cancel this reservation.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ Only the issuer can cancel this reservation.', ephemeral: true });
+                }
+                return;
+            }
+
+            // Check if already completed
+            if (reservation.status === 'COMPLETED') {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ Cannot cancel a completed reservation.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ Cannot cancel a completed reservation.', ephemeral: true });
+                }
+                return;
+            }
+
+            if (reservation.status === 'CANCELLED') {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ This reservation is already cancelled.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ This reservation is already cancelled.', ephemeral: true });
+                }
+                return;
+            }
+
+            // Cancel the reservation
+            const cancelResult = await db.cancelRegearReservation(guildId, regearId);
+
+            if (!cancelResult.success) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: `❌ Failed to cancel reservation: ${cancelResult.error}`, ephemeral: true });
+                } else {
+                    await interaction.reply({ content: `❌ Failed to cancel reservation: ${cancelResult.error}`, ephemeral: true });
+                }
+                return;
+            }
+
+            // Get updated reservation
+            const updatedReservation = await db.getRegearReservation(guildId, regearId);
+
+            // Build cancelled embed
+            const cancelledEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'CANCELLED');
+
+            // Update the message
+            try {
+                await interaction.message.edit({ embeds: [cancelledEmbed], components: [] });
+            } catch (editError) {
+                console.error('Failed to edit message:', editError);
+            }
+
+            // Log to channel
+            try {
+                await this.logRegearReservationToChannel(interaction, db, updatedReservation, 'CANCELLED');
+            } catch (logError) {
+                console.error('Failed to log to channel:', logError);
+            }
+
+            if (interaction.deferred || interaction.replied) {
+                await interaction.followUp({ content: '❌ Reservation cancelled.', ephemeral: true });
+            } else {
+                await interaction.reply({ content: '❌ Reservation cancelled.', ephemeral: true });
+            }
+        } catch (error) {
+            console.error('Error in handleCancelReservation:', error);
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ An error occurred while processing the cancellation.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ An error occurred while processing the cancellation.', ephemeral: true });
+                }
+            } catch (replyError) {
+                console.error('Failed to send error message:', replyError);
+            }
         }
-
-        // Check if user is the issuer
-        if (interaction.user.id !== reservation.issuerId) {
-            await interaction.followUp({ content: '❌ Only the issuer can cancel this reservation.', ephemeral: true });
-            return;
-        }
-
-        // Check if already completed
-        if (reservation.status === 'COMPLETED') {
-            await interaction.followUp({ content: '❌ Cannot cancel a completed reservation.', ephemeral: true });
-            return;
-        }
-
-        if (reservation.status === 'CANCELLED') {
-            await interaction.followUp({ content: '❌ This reservation is already cancelled.', ephemeral: true });
-            return;
-        }
-
-        // Cancel the reservation
-        const cancelResult = await db.cancelRegearReservation(interaction.guildId, regearId);
-
-        if (!cancelResult.success) {
-            await interaction.followUp({ content: `❌ Failed to cancel reservation: ${cancelResult.error}`, ephemeral: true });
-            return;
-        }
-
-        // Get updated reservation
-        const updatedReservation = await db.getRegearReservation(interaction.guildId, regearId);
-
-        // Build cancelled embed
-        const cancelledEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'CANCELLED');
-
-        // Update the message
-        await interaction.message.edit({ embeds: [cancelledEmbed], components: [] });
-
-        // Log to channel
-        await this.logRegearReservationToChannel(interaction, db, updatedReservation, 'CANCELLED');
-
-        await interaction.followUp({ content: '❌ Reservation cancelled.', ephemeral: true });
     },
 
     async handleRecipientPickedUp(interaction, db, regearId) {
-        await interaction.deferUpdate();
+        try {
+            // Defer the interaction first
+            if (!interaction.deferred && !interaction.replied) {
+                await interaction.deferUpdate();
+            }
 
-        const reservation = await db.getRegearReservation(interaction.guildId, regearId);
-        if (!reservation) {
-            await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
-            return;
-        }
-
-        // Check if user is the recipient
-        if (interaction.user.id !== reservation.recipientId) {
-            await interaction.followUp({ content: '❌ Only the recipient can mark items as picked up.', ephemeral: true });
-            return;
-        }
-
-        // Check if already completed or cancelled
-        if (reservation.status === 'COMPLETED' || reservation.status === 'CANCELLED') {
-            await interaction.followUp({ content: `❌ This reservation is already ${reservation.status.toLowerCase()}.`, ephemeral: true });
-            return;
-        }
-
-        // Update status to PICKED_UP
-        await db.updateRegearStatus(interaction.guildId, regearId, 'PICKED_UP');
-
-        // Get updated reservation
-        const updatedReservation = await db.getRegearReservation(interaction.guildId, regearId);
-
-        // Build picked up embed
-        const pickedUpEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'PICKED_UP');
-
-        // Update the message
-        await interaction.message.edit({ embeds: [pickedUpEmbed], components: [] });
-
-        // Update issuer's message if it exists
-        if (reservation.reservationMessageId) {
-            try {
-                const issuerChannel = await interaction.channel.fetch();
-                const issuerMessage = await issuerChannel.messages.fetch(reservation.reservationMessageId).catch(() => null);
-                if (issuerMessage) {
-                    const issuerEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'PICKED_UP');
-                    const buttonRow = new ActionRowBuilder()
-                        .addComponents(
-                            new ButtonBuilder()
-                                .setCustomId(`regear_confirm_pickup_${regearId}`)
-                                .setLabel('✅ Confirm Pickup')
-                                .setStyle(ButtonStyle.Success),
-                            new ButtonBuilder()
-                                .setCustomId(`regear_cancel_reservation_${regearId}`)
-                                .setLabel('❌ Cancel Reservation')
-                                .setStyle(ButtonStyle.Danger)
-                        );
-                    await issuerMessage.edit({ embeds: [issuerEmbed], components: [buttonRow] });
+            // Get reservation (works even if guildId is null for DM interactions)
+            const reservation = await db.getRegearReservation(interaction.guildId, regearId);
+            if (!reservation) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ Reservation not found.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ Reservation not found.', ephemeral: true });
                 }
-            } catch (error) {
-                console.error('Failed to update issuer message:', error);
+                return;
+            }
+
+            // Get guildId from reservation (needed for DM interactions)
+            const guildId = reservation.guildId;
+
+            // Check if user is the recipient
+            if (interaction.user.id !== reservation.recipientId) {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ Only the recipient can mark items as picked up.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ Only the recipient can mark items as picked up.', ephemeral: true });
+                }
+                return;
+            }
+
+            // Check if already completed or cancelled
+            if (reservation.status === 'COMPLETED' || reservation.status === 'CANCELLED') {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: `❌ This reservation is already ${reservation.status.toLowerCase()}.`, ephemeral: true });
+                } else {
+                    await interaction.reply({ content: `❌ This reservation is already ${reservation.status.toLowerCase()}.`, ephemeral: true });
+                }
+                return;
+            }
+
+            // Update status to PICKED_UP (pass null guildId, function will find it)
+            await db.updateRegearStatus(guildId, regearId, 'PICKED_UP');
+
+            // Get updated reservation
+            const updatedReservation = await db.getRegearReservation(guildId, regearId);
+
+            // Build picked up embed
+            const pickedUpEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'PICKED_UP');
+
+            // Update the message
+            try {
+                await interaction.message.edit({ embeds: [pickedUpEmbed], components: [] });
+            } catch (editError) {
+                console.error('Failed to edit message:', editError);
+            }
+
+            // Update issuer's message if it exists
+            if (reservation.reservationMessageId && reservation.reservationChannelId) {
+                try {
+                    // Get the guild from the reservation
+                    const guild = await interaction.client.guilds.fetch(guildId).catch(() => null);
+                    if (guild) {
+                        const issuerChannel = await guild.channels.fetch(reservation.reservationChannelId).catch(() => null);
+                        if (issuerChannel) {
+                            const issuerMessage = await issuerChannel.messages.fetch(reservation.reservationMessageId).catch(() => null);
+                            if (issuerMessage) {
+                                const issuerEmbed = await this.buildReservationEmbed(interaction, db, updatedReservation, 'PICKED_UP');
+                                const buttonRow = new ActionRowBuilder()
+                                    .addComponents(
+                                        new ButtonBuilder()
+                                            .setCustomId(`regear_confirm_pickup_${regearId}`)
+                                            .setLabel('✅ Confirm Pickup')
+                                            .setStyle(ButtonStyle.Success),
+                                        new ButtonBuilder()
+                                            .setCustomId(`regear_cancel_reservation_${regearId}`)
+                                            .setLabel('❌ Cancel Reservation')
+                                            .setStyle(ButtonStyle.Danger)
+                                    );
+                                await issuerMessage.edit({ embeds: [issuerEmbed], components: [buttonRow] });
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to update issuer message:', error);
+                }
+            }
+
+            if (interaction.deferred || interaction.replied) {
+                await interaction.followUp({ content: '✅ You\'ve marked items as picked up. Waiting for issuer confirmation.', ephemeral: true });
+            } else {
+                await interaction.reply({ content: '✅ You\'ve marked items as picked up. Waiting for issuer confirmation.', ephemeral: true });
+            }
+        } catch (error) {
+            console.error('Error in handleRecipientPickedUp:', error);
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: '❌ An error occurred while processing the pickup confirmation.', ephemeral: true });
+                } else {
+                    await interaction.reply({ content: '❌ An error occurred while processing the pickup confirmation.', ephemeral: true });
+                }
+            } catch (replyError) {
+                console.error('Failed to send error message:', replyError);
             }
         }
-
-        await interaction.followUp({ content: '✅ You\'ve marked items as picked up. Waiting for issuer confirmation.', ephemeral: true });
     },
 
     async logRegearReservationToChannel(interaction, db, reservation, status, results = null) {

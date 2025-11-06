@@ -1726,6 +1726,7 @@ class DatabaseManager {
                 pickedUpAt: null,
                 completedAt: null,
                 reservationMessageId: reservationData.reservationMessageId || null,
+                reservationChannelId: reservationData.reservationChannelId || null,
                 recipientMessageId: reservationData.recipientMessageId || null,
                 logMessageId: reservationData.logMessageId || null
             };
@@ -1741,6 +1742,11 @@ class DatabaseManager {
 
     async getRegearReservation(guildId, regearId) {
         try {
+            // If guildId is null (DM interaction), search across all guilds
+            if (!guildId) {
+                return await this.findRegearReservationByRegearId(regearId);
+            }
+
             const collection = await this.getGuildCollection(guildId);
             const reservation = await collection.findOne({
                 guildId: guildId,
@@ -1754,8 +1760,46 @@ class DatabaseManager {
         }
     }
 
+    async findRegearReservationByRegearId(regearId) {
+        try {
+            // Search across all guild collections
+            const db = this.client.db(this.config.database.databaseName);
+            const collections = await db.listCollections().toArray();
+            
+            for (const collectionInfo of collections) {
+                if (collectionInfo.name.startsWith('guild_')) {
+                    const collection = db.collection(collectionInfo.name);
+                    const reservation = await collection.findOne({
+                        type: 'regear_reservation',
+                        regearId: regearId
+                    });
+                    
+                    if (reservation) {
+                        console.log(`✅ Found reservation ${regearId} in guild collection ${collectionInfo.name}`);
+                        return reservation;
+                    }
+                }
+            }
+            
+            console.log(`⚠️ Reservation ${regearId} not found in any guild collection`);
+            return null;
+        } catch (error) {
+            console.error('❌ Failed to find regear reservation by regearId:', error);
+            return null;
+        }
+    }
+
     async updateRegearStatus(guildId, regearId, newStatus, additionalData = {}) {
         try {
+            // If guildId is null, find the reservation first to get the guildId
+            if (!guildId) {
+                const reservation = await this.findRegearReservationByRegearId(regearId);
+                if (!reservation) {
+                    return { success: false, error: 'Reservation not found' };
+                }
+                guildId = reservation.guildId;
+            }
+
             const collection = await this.getGuildCollection(guildId);
             const updateData = { 
                 status: newStatus,
