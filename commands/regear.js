@@ -996,13 +996,15 @@ module.exports = {
             // Get guildId from reservation if needed (for DM interactions)
             const guildId = reservation.guildId || interaction.guildId;
 
-            // Check if user has regear permission
+            // Check if user has regear permission or is the issuer
             const hasPermission = await this.checkRegearPermission(interaction, db, guildId);
-            if (!hasPermission) {
+            const isIssuer = interaction.user.id === reservation.issuerId;
+            
+            if (!hasPermission && !isIssuer) {
                 const embed = new EmbedBuilder()
                     .setColor('#FF0000')
                     .setTitle('❌ Permission Denied')
-                    .setDescription('You do not have permission to confirm regear pickups.\n\n**Required:** Administrator role or regear permission')
+                    .setDescription('You do not have permission to confirm regear pickups.\n\n**Required:** Administrator role, regear permission, or be the issuer')
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
                 
@@ -1010,16 +1012,6 @@ module.exports = {
                     await interaction.followUp({ embeds: [embed], ephemeral: true });
                 } else {
                     await interaction.reply({ embeds: [embed], ephemeral: true });
-                }
-                return;
-            }
-
-            // Check if user is the issuer (additional check)
-            if (interaction.user.id !== reservation.issuerId) {
-                if (interaction.deferred || interaction.replied) {
-                    await interaction.followUp({ content: '❌ Only the issuer can confirm pickup.', ephemeral: true });
-                } else {
-                    await interaction.reply({ content: '❌ Only the issuer can confirm pickup.', ephemeral: true });
                 }
                 return;
             }
@@ -1187,13 +1179,15 @@ module.exports = {
             // Get guildId from reservation if needed (for DM interactions)
             const guildId = reservation.guildId || interaction.guildId;
 
-            // Check if user has regear permission
+            // Check if user has regear permission or is the issuer
             const hasPermission = await this.checkRegearPermission(interaction, db, guildId);
-            if (!hasPermission) {
+            const isIssuer = interaction.user.id === reservation.issuerId;
+            
+            if (!hasPermission && !isIssuer) {
                 const embed = new EmbedBuilder()
                     .setColor('#FF0000')
                     .setTitle('❌ Permission Denied')
-                    .setDescription('You do not have permission to cancel regear reservations.\n\n**Required:** Administrator role or regear permission')
+                    .setDescription('You do not have permission to cancel regear reservations.\n\n**Required:** Administrator role, regear permission, or be the issuer')
                     .setFooter({ text: 'Phoenix Assistance Bot' })
                     .setTimestamp();
                 
@@ -1201,16 +1195,6 @@ module.exports = {
                     await interaction.followUp({ embeds: [embed], ephemeral: true });
                 } else {
                     await interaction.reply({ embeds: [embed], ephemeral: true });
-                }
-                return;
-            }
-
-            // Check if user is the issuer (additional check)
-            if (interaction.user.id !== reservation.issuerId) {
-                if (interaction.deferred || interaction.replied) {
-                    await interaction.followUp({ content: '❌ Only the issuer can cancel this reservation.', ephemeral: true });
-                } else {
-                    await interaction.reply({ content: '❌ Only the issuer can cancel this reservation.', ephemeral: true });
                 }
                 return;
             }
