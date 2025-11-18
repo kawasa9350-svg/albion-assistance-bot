@@ -1705,10 +1705,80 @@ class DatabaseManager {
     }
 
     // Regear Reservation Functions
+    async reserveItemsForRegear(guildId, items = []) {
+        if (!items.length) {
+            return { success: true, adjustments: [] };
+        }
+
+        const reservedItems = [];
+
+        for (const item of items) {
+            const result = await this.removeGearFromInventory(
+                guildId,
+                item.name,
+                item.slot,
+                item.tierEquivalent,
+                1
+            );
+
+            if (!result.success) {
+                console.error(`❌ Failed to reserve item ${item.name} (${item.slot}) for regear: ${result.error}`);
+                if (reservedItems.length > 0) {
+                    await this.restoreReservedItems(guildId, reservedItems);
+                }
+                return { success: false, error: result.error || `Failed to reserve ${item.name}` };
+            }
+
+            reservedItems.push({
+                ...item,
+                remainingQuantity: result.remainingQuantity
+            });
+        }
+
+        console.log(`✅ Reserved ${reservedItems.length} item(s) for regear in guild ${guildId}`);
+        return { success: true, adjustments: reservedItems };
+    }
+
+    async restoreReservedItems(guildId, items = []) {
+        if (!items.length) {
+            return { success: true };
+        }
+
+        const errors = [];
+        for (const item of items) {
+            const restored = await this.addGearToInventory(guildId, {
+                name: item.name,
+                slot: item.slot,
+                tierEquivalent: item.tierEquivalent,
+                quantity: 1,
+                notes: item.notes || ''
+            });
+
+            if (!restored) {
+                errors.push(`${item.name} (${item.slot})`);
+            }
+        }
+
+        if (errors.length > 0) {
+            const errorMessage = `Failed to restore reserved items: ${errors.join(', ')}`;
+            console.error(`❌ ${errorMessage}`);
+            return { success: false, error: errorMessage };
+        }
+
+        console.log(`✅ Restored ${items.length} reserved item(s) back to inventory for guild ${guildId}`);
+        return { success: true };
+    }
+
     async createRegearReservation(guildId, reservationData) {
+        let reserveResult = null;
         try {
             const collection = await this.getGuildCollection(guildId);
             const regearId = `regear_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+            reserveResult = await this.reserveItemsForRegear(guildId, reservationData.items);
+            if (!reserveResult.success) {
+                return { success: false, error: reserveResult.error || 'Failed to reserve items for regear' };
+            }
             
             const reservation = {
                 regearId: regearId,
@@ -1728,7 +1798,9 @@ class DatabaseManager {
                 reservationMessageId: reservationData.reservationMessageId || null,
                 reservationChannelId: reservationData.reservationChannelId || null,
                 recipientMessageId: reservationData.recipientMessageId || null,
-                logMessageId: reservationData.logMessageId || null
+                logMessageId: reservationData.logMessageId || null,
+                inventoryReserved: true,
+                reservedInventoryAdjustments: reserveResult.adjustments || []
             };
 
             await collection.insertOne(reservation);
@@ -1736,6 +1808,11 @@ class DatabaseManager {
             return { success: true, regearId: regearId, reservation: reservation };
         } catch (error) {
             console.error('❌ Failed to create regear reservation:', error);
+
+            if (reserveResult && reserveResult.success) {
+                await this.restoreReservedItems(guildId, reserveResult.adjustments || reservationData.items || []);
+            }
+
             return { success: false, error: error.message };
         }
     }
@@ -1836,7 +1913,6 @@ class DatabaseManager {
 
     async completeRegearReservation(guildId, regearId) {
         try {
-            const collection = await this.getGuildCollection(guildId);
             const reservation = await this.getRegearReservation(guildId, regearId);
 
             if (!reservation) {
@@ -1851,7 +1927,17 @@ class DatabaseManager {
                 return { success: false, error: 'Reservation was cancelled' };
             }
 
-            // Remove items from inventory
+            if (reservation.inventoryReserved) {
+                await this.updateRegearStatus(guildId, regearId, 'COMPLETED', {
+                    inventoryReserved: false,
+                    reservedInventoryAdjustments: reservation.reservedInventoryAdjustments || []
+                });
+
+                console.log(`✅ Completed regear reservation: ${regearId} (items were already reserved)`);
+                return { success: true, results: reservation.items || [], errors: [] };
+            }
+
+            // Remove items from inventory (legacy reservations)
             const results = [];
             const errors = [];
 
@@ -1908,8 +1994,17 @@ class DatabaseManager {
                 return { success: true, message: 'Already cancelled' };
             }
 
-            // Update status to cancelled (items are already reserved, so we just mark as cancelled)
-            await this.updateRegearStatus(guildId, regearId, 'CANCELLED');
+            if (reservation.inventoryReserved) {
+                const restoreResult = await this.restoreReservedItems(guildId, reservation.items);
+                if (!restoreResult.success) {
+                    return { success: false, error: restoreResult.error || 'Failed to restore reserved items to inventory' };
+                }
+            }
+
+            await this.updateRegearStatus(guildId, regearId, 'CANCELLED', {
+                inventoryReserved: false,
+                reservedInventoryAdjustments: reservation.reservedInventoryAdjustments || []
+            });
 
             console.log(`✅ Cancelled regear reservation: ${regearId}`);
             return { success: true };
