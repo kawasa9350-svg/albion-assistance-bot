@@ -309,10 +309,10 @@ module.exports = {
                     });
                 }
                 try {
-                    // Get tax rate for this content type, use default 30% if none set
+                    // Get tax rate for this content type, use default 20% if none set
                     let taxRate = await db.getTaxRate(interaction.guildId, splitType);
                     console.log(`Raw tax rate from DB for ${splitType}:`, taxRate, typeof taxRate);
-                    if (taxRate === null || taxRate === undefined || taxRate === 0) {
+                    if (taxRate === null || taxRate === undefined) {
                         taxRate = 20; // Default 20% tax rate
                         console.log(`Using default tax rate: ${taxRate}%`);
                     } else {

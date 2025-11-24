@@ -212,13 +212,18 @@ class DatabaseManager {
             const guild = await collection.findOne({ guildId: guildId });
             
             if (!guild || !guild.taxRates) {
-                return 0; // Default tax rate
+                return null; // Not configured
             }
             
-            return guild.taxRates[contentType] || 0;
+            // Check if the key exists in taxRates
+            if (contentType in guild.taxRates) {
+                return guild.taxRates[contentType]; // Return the configured value (even if 0)
+            }
+            
+            return null; // Not configured
         } catch (error) {
             console.error('❌ Failed to get tax rate:', error);
-            return 0;
+            return null;
         }
     }
 
