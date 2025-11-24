@@ -1,4 +1,4 @@
-const { Client, Collection, GatewayIntentBits, Events, InteractionType } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, Events, InteractionType, ChannelType } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -115,6 +115,11 @@ async function loadAllVoiceChannelSetups() {
         // Initialize voice channel setups storage if it doesn't exist
         if (!client.voiceChannelSetups) {
             client.voiceChannelSetups = new Map();
+        }
+        
+        // Initialize temporary channels tracking if it doesn't exist
+        if (!client.temporaryChannels) {
+            client.temporaryChannels = new Map();
         }
         
         // Get all guilds the bot is in
@@ -395,6 +400,21 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
         }
     } catch (error) {
         console.error('❌ Error handling voice state update:', error);
+    }
+});
+
+// Channel delete event - clean up temporary channel tracking
+client.on(Events.ChannelDelete, async (channel) => {
+    try {
+        if (channel.type === ChannelType.GuildVoice && channel.guild) {
+            const temporaryChannels = client.temporaryChannels?.get(channel.guild.id);
+            if (temporaryChannels && temporaryChannels.has(channel.id)) {
+                temporaryChannels.delete(channel.id);
+                console.log(`🧹 Cleaned up tracking for deleted temporary channel: ${channel.name} (ID: ${channel.id})`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Error handling channel delete:', error);
     }
 });
 

@@ -342,10 +342,19 @@ module.exports = {
                 permissionOverwrites: permissionOverwrites
             });
 
+            // Track this temporary channel by ID (so it can be deleted even if renamed)
+            if (!voiceState.client.temporaryChannels) {
+                voiceState.client.temporaryChannels = new Map();
+            }
+            if (!voiceState.client.temporaryChannels.has(guild.id)) {
+                voiceState.client.temporaryChannels.set(guild.id, new Set());
+            }
+            voiceState.client.temporaryChannels.get(guild.id).add(tempChannel.id);
+
             // Move the user to the new channel
             await voiceState.member.voice.setChannel(tempChannel);
 
-            console.log(`Created temporary voice channel "${channelName}" for user ${user.username} at position ${joinToCreatePosition + 1}`);
+            console.log(`Created temporary voice channel "${channelName}" (ID: ${tempChannel.id}) for user ${user.username} at position ${joinToCreatePosition + 1}`);
 
         } catch (error) {
             console.error('Error creating temporary voice channel:', error);
@@ -364,18 +373,22 @@ module.exports = {
             if (channel.members.size === 0) {
                 const guildId = voiceState.guild.id;
                 const setup = voiceState.client.voiceChannelSetups?.get(guildId);
+                const temporaryChannels = voiceState.client.temporaryChannels?.get(guildId);
                 
                 // Only delete if:
                 // 1. There's a voice channel setup for this guild
                 // 2. This is not the join-to-create channel itself
-                // 3. The channel name ends with "'s Channel" (indicating it was created by our bot)
+                // 3. This channel is tracked as a temporary channel (created by our bot)
                 if (setup && 
                     channel.id !== setup.channelId && 
-                    channel.name.endsWith("'s Channel")) {
+                    temporaryChannels && temporaryChannels.has(channel.id)) {
                     
                     // This is a temporary channel created by our bot, delete it immediately when empty
-                    console.log(`🗑️ Deleting empty temporary voice channel: ${channel.name}`);
+                    console.log(`🗑️ Deleting empty temporary voice channel: ${channel.name} (ID: ${channel.id})`);
                     await channel.delete();
+                    
+                    // Remove from tracking
+                    temporaryChannels.delete(channel.id);
                     console.log(`✅ Successfully deleted empty temporary voice channel: ${channel.name}`);
                 }
             }
@@ -391,26 +404,31 @@ module.exports = {
             const setup = guild.client.voiceChannelSetups?.get(guild.id);
             if (!setup) return;
 
-            // Get all voice channels in the same category as the setup
-            const category = guild.channels.cache.get(setup.categoryId);
-            if (!category) return;
+            const temporaryChannels = guild.client.temporaryChannels?.get(guild.id);
+            if (!temporaryChannels || temporaryChannels.size === 0) return;
 
-            const voiceChannels = category.children.cache.filter(channel => 
-                channel.type === ChannelType.GuildVoice && 
-                channel.id !== setup.channelId &&
-                channel.name.endsWith("'s Channel")
-            );
-
-            // Check each temporary channel
-            for (const [channelId, channel] of voiceChannels) {
-                if (channel.members.size === 0) {
-                    console.log(`🗑️ Found empty temporary voice channel during cleanup check: ${channel.name}`);
-                    try {
-                        await channel.delete();
-                        console.log(`✅ Successfully deleted empty temporary voice channel: ${channel.name}`);
-                    } catch (deleteError) {
-                        console.error(`❌ Failed to delete channel ${channel.name}:`, deleteError);
+            // Check each tracked temporary channel
+            for (const channelId of temporaryChannels) {
+                try {
+                    const channel = guild.channels.cache.get(channelId);
+                    
+                    // If channel doesn't exist anymore, remove from tracking
+                    if (!channel) {
+                        temporaryChannels.delete(channelId);
+                        continue;
                     }
+                    
+                    // If channel is empty, delete it
+                    if (channel.members.size === 0) {
+                        console.log(`🗑️ Found empty temporary voice channel during cleanup check: ${channel.name} (ID: ${channelId})`);
+                        await channel.delete();
+                        temporaryChannels.delete(channelId);
+                        console.log(`✅ Successfully deleted empty temporary voice channel: ${channel.name}`);
+                    }
+                } catch (deleteError) {
+                    console.error(`❌ Failed to delete channel ${channelId}:`, deleteError);
+                    // Remove from tracking if deletion failed (channel might already be deleted)
+                    temporaryChannels.delete(channelId);
                 }
             }
         } catch (error) {
