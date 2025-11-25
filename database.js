@@ -1575,6 +1575,63 @@ class DatabaseManager {
         }
     }
 
+    async setGearQuantity(guildId, gearData) {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            console.log(`📦 Setting gear quantity: ${gearData.name} (${gearData.slot}) to ${gearData.quantity} for guild ${guildId}`);
+            
+            // Check if gear already exists with same name, slot, and tier equivalent
+            const existingGear = await collection.findOne({
+                guildId: guildId,
+                type: 'inventory_item',
+                name: gearData.name,
+                slot: gearData.slot,
+                tierEquivalent: gearData.tierEquivalent
+            });
+            
+            if (existingGear) {
+                // Update quantity to the specified value
+                const result = await collection.updateOne(
+                    {
+                        guildId: guildId,
+                        type: 'inventory_item',
+                        name: gearData.name,
+                        slot: gearData.slot,
+                        tierEquivalent: gearData.tierEquivalent
+                    },
+                    { 
+                        $set: { 
+                            quantity: gearData.quantity || 0,
+                            notes: gearData.notes !== undefined ? gearData.notes : existingGear.notes
+                        } 
+                    }
+                );
+                
+                console.log(`✅ Set quantity for existing gear: ${gearData.name} to ${gearData.quantity}`);
+                return result.modifiedCount > 0;
+            } else {
+                // Create new gear entry with the specified quantity
+                const gear = {
+                    guildId: guildId,
+                    type: 'inventory_item',
+                    name: gearData.name,
+                    slot: gearData.slot,
+                    tierEquivalent: gearData.tierEquivalent,
+                    quantity: gearData.quantity || 0,
+                    notes: gearData.notes || '',
+                    createdAt: new Date()
+                };
+                
+                const result = await collection.insertOne(gear);
+                console.log(`✅ Created new gear entry with set quantity: ${gearData.name} (${gearData.quantity})`);
+                return result.acknowledged;
+            }
+        } catch (error) {
+            console.error('❌ Failed to set gear quantity:', error);
+            return false;
+        }
+    }
+
     async getInventory(guildId, slot = null, tierEquivalent = null, searchName = null) {
         try {
             const collection = await this.getGuildCollection(guildId);
