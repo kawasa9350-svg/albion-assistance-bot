@@ -152,7 +152,39 @@ module.exports = {
                     option.setName('tier')
                         .setDescription('Filter by tier (e.g., T7)')
                         .setRequired(false)
-                        .setAutocomplete(true))),
+                        .setAutocomplete(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('set')
+                .setDescription('Set gear quantity in inventory')
+                .addStringOption(option =>
+                    option.setName('slot')
+                        .setDescription('Gear slot (select this first)')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: 'Head', value: 'head' },
+                            { name: 'Chest', value: 'chest' },
+                            { name: 'Shoes', value: 'shoes' },
+                            { name: 'Main-Hand', value: 'main-hand' },
+                            { name: 'Off-Hand', value: 'off-hand' }
+                        ))
+                .addStringOption(option =>
+                    option.setName('name')
+                        .setDescription('Gear name')
+                        .setRequired(true)
+                        .setAutocomplete(true))
+                .addStringOption(option =>
+                    option.setName('tier')
+                        .setDescription('Tier equivalent (e.g., T4.3, 4.3, T7)')
+                        .setRequired(true))
+                .addIntegerOption(option =>
+                    option.setName('quantity')
+                        .setDescription('Quantity to set')
+                        .setRequired(true))
+                .addStringOption(option =>
+                    option.setName('notes')
+                        .setDescription('Optional notes')
+                        .setRequired(false))),
 
     async execute(interaction, db) {
         try {
@@ -182,6 +214,9 @@ module.exports = {
                     break;
                 case 'stock':
                     await this.handleStock(interaction, db);
+                    break;
+                case 'set':
+                    await this.handleSet(interaction, db);
                     break;
                 default:
                     await interaction.reply({ content: 'Unknown subcommand!', ephemeral: true });
@@ -490,6 +525,53 @@ module.exports = {
         }
 
         await interaction.reply({ embeds: [embed] });
+    },
+
+    async handleSet(interaction, db) {
+        const slot = interaction.options.getString('slot');
+        const name = interaction.options.getString('name');
+        const tierInput = interaction.options.getString('tier');
+        const quantity = interaction.options.getInteger('quantity');
+        const notes = interaction.options.getString('notes');
+
+        // Parse tier equivalent
+        const tierEquivalent = parseTierEquivalent(tierInput);
+
+        const gearData = {
+            name: name,
+            slot: slot,
+            tierEquivalent: tierEquivalent,
+            quantity: quantity,
+            notes: notes !== null ? notes : undefined
+        };
+
+        const success = await db.setGearQuantity(interaction.guildId, gearData);
+
+        if (success) {
+            const embed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle('✅ Gear Quantity Set')
+                .addFields(
+                    { name: 'Name', value: name, inline: true },
+                    { name: 'Slot', value: slot.charAt(0).toUpperCase() + slot.slice(1), inline: true },
+                    { name: 'Tier Equivalent', value: tierEquivalent, inline: true },
+                    { name: 'Quantity', value: quantity.toString(), inline: true },
+                    { name: 'Notes', value: notes || 'None', inline: false }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [embed] });
+        } else {
+            const embed = new EmbedBuilder()
+                .setColor('#FF0000')
+                .setTitle('❌ Error')
+                .setDescription('Failed to set gear quantity in inventory.')
+                .setFooter({ text: 'Phoenix Assistance Bot' })
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [embed] });
+        }
     },
 
     async autocomplete(interaction) {
