@@ -64,37 +64,49 @@ dbManager.connect()
 
 // Bot ready event - Using 'ready' string to match working Alliance bot pattern
 client.once('ready', async () => {
-    console.log('✅ Client ready event received!');
-    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
-    console.log(`🔗 Bot ID: ${client.user.id}`);
-    console.log(`🌍 Connected to ${client.guilds.cache.size} guild(s)`);
-    console.log(`🌐 Gateway: ${client.ws.gateway}`);
-    
-    // Set bot status immediately (don't wait for database)
-    client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: ActivityType.Watching });
-    
-    // Try to load data from database (non-blocking)
     try {
-        // Check if database is connected
-        if (dbManager.db) {
-            console.log('📊 Database is connected, loading data...');
-            
-            // Load all event signups for all guilds to ensure we have current state after bot reset
-            await loadAllEventSignupsForAllGuilds();
-            
-            // Load all voice channel setups for all guilds
-            await loadAllVoiceChannelSetups();
-        } else {
-            console.log('⚠️ Database not connected yet, skipping data load');
+        console.log('✅ Client ready event received!');
+        console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+        console.log(`🔗 Bot ID: ${client.user.id}`);
+        console.log(`🌍 Connected to ${client.guilds.cache.size} guild(s)`);
+        console.log(`🌐 Gateway: ${client.ws.gateway}`);
+        
+        // Set bot status immediately (don't wait for database)
+        try {
+            client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: ActivityType.Watching });
+            console.log('✅ Bot activity set');
+        } catch (activityError) {
+            console.error('❌ Error setting bot activity:', activityError);
         }
+        
+        // Try to load data from database (non-blocking)
+        try {
+            // Check if database is connected
+            if (dbManager.db) {
+                console.log('📊 Database is connected, loading data...');
+                
+                // Load all event signups for all guilds to ensure we have current state after bot reset
+                await loadAllEventSignupsForAllGuilds();
+                
+                // Load all voice channel setups for all guilds
+                await loadAllVoiceChannelSetups();
+            } else {
+                console.log('⚠️ Database not connected yet, skipping data load');
+            }
+        } catch (error) {
+            console.error('❌ Error loading data from database:', error);
+            // Don't throw - bot should continue even if data loading fails
+        }
+        
+        // Test event handler registration
+        console.log('🔧 Testing event handler registration...');
+        console.log(`MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
+        console.log('✅ Bot initialization complete!');
     } catch (error) {
-        console.error('❌ Error loading data from database:', error);
-        // Don't throw - bot should continue even if data loading fails
+        console.error('❌ CRITICAL ERROR in ready event handler:', error);
+        console.error('Stack trace:', error.stack);
+        // Don't exit - let the bot continue running
     }
-    
-    // Test event handler registration
-    console.log('🔧 Testing event handler registration...');
-    console.log(`MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
 });
 
 // Helper function to load all event signups for all guilds
@@ -1081,6 +1093,17 @@ server.listen(PORT, () => {
     console.log(`🌐 HTTP server running on port ${PORT}`);
 });
 
+// Add error listeners BEFORE login to catch any connection issues
+let loginErrorOccurred = false;
+client.on('error', (error) => {
+    if (!loginErrorOccurred) {
+        loginErrorOccurred = true;
+        console.error('❌ Discord client error during login:', error);
+        console.error('Error message:', error.message);
+        console.error('Error code:', error.code);
+    }
+});
+
 // Attempt login with retry logic (matching Alliance bot pattern)
 const loginWithRetry = async (retries = 3) => {
     // Validate token before attempting login
@@ -1102,8 +1125,14 @@ const loginWithRetry = async (retries = 3) => {
     try {
         console.log('🔑 Attempting to login with token:', config.bot.token ? config.bot.token.substring(0, 10) + '...' : 'undefined');
         console.log('📏 Token length:', config.bot.token.length);
+        console.log('🔄 Starting Discord login process...');
+        
+        // Login - this returns a promise that resolves when WebSocket connects
         await client.login(config.bot.token);
-        console.log('✅ Successfully logged in to Discord');
+        console.log('✅ Login promise resolved - WebSocket connected');
+        
+        // Note: The 'ready' event will fire separately after login completes
+        // We don't need to wait for it here as it's handled by the ready event handler
     } catch (error) {
         console.error('❌ Login failed:', error.message);
         console.error('Error details:', {
