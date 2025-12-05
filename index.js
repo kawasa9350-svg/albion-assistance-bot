@@ -51,6 +51,17 @@ for (const file of commandFiles) {
     }
 }
 
+// Connect to database early (non-blocking, matching Alliance bot pattern)
+dbManager.connect()
+    .then((connected) => {
+        if (connected) {
+            console.log('✅ Connected to MongoDB');
+        } else {
+            console.log('⚠️ MongoDB connection failed, bot will continue without database');
+        }
+    })
+    .catch(err => console.error('❌ MongoDB connection error:', err));
+
 // Bot ready event - Using 'ready' string to match working Alliance bot pattern
 client.once('ready', async () => {
     console.log('✅ Client ready event received!');
@@ -59,22 +70,27 @@ client.once('ready', async () => {
     console.log(`🌍 Connected to ${client.guilds.cache.size} guild(s)`);
     console.log(`🌐 Gateway: ${client.ws.gateway}`);
     
-    // Connect to database
-    const dbConnected = await dbManager.connect();
-    if (dbConnected) {
-        console.log('📊 Database connection established');
-        
-        // Load all event signups for all guilds to ensure we have current state after bot reset
-        await loadAllEventSignupsForAllGuilds();
-        
-        // Load all voice channel setups for all guilds
-        await loadAllVoiceChannelSetups();
-    } else {
-        console.log('❌ Failed to connect to database');
-    }
-    
-    // Set bot status
+    // Set bot status immediately (don't wait for database)
     client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: ActivityType.Watching });
+    
+    // Try to load data from database (non-blocking)
+    try {
+        // Check if database is connected
+        if (dbManager.db) {
+            console.log('📊 Database is connected, loading data...');
+            
+            // Load all event signups for all guilds to ensure we have current state after bot reset
+            await loadAllEventSignupsForAllGuilds();
+            
+            // Load all voice channel setups for all guilds
+            await loadAllVoiceChannelSetups();
+        } else {
+            console.log('⚠️ Database not connected yet, skipping data load');
+        }
+    } catch (error) {
+        console.error('❌ Error loading data from database:', error);
+        // Don't throw - bot should continue even if data loading fails
+    }
     
     // Test event handler registration
     console.log('🔧 Testing event handler registration...');
@@ -1018,29 +1034,8 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Create HTTP server for ping services
-const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is alive! 🟢');
-});
-
-// Start HTTP server on port 8080 (Render will use this)
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-    console.log(`🌐 HTTP server running on port ${PORT}`);
-});
-
-// Login to Discord with error handling
-console.log('🚀 Attempting to login to Discord...');
-
-// Check if token exists
-if (!config.bot.token || config.bot.token === '') {
-    console.error('❌ ERROR: Bot token is missing or empty!');
-    console.error('Please set BOT_TOKEN in your .env file or environment variables.');
-    process.exit(1);
-}
-
 // Log connection states - Using string event names to match working Alliance bot pattern
+// IMPORTANT: Register ALL event handlers BEFORE login (matching Alliance bot pattern)
 client.on('shardReady', (id) => {
     console.log(`✅ Shard ${id} is ready!`);
 });
@@ -1072,6 +1067,18 @@ client.on('reconnecting', () => {
 
 client.on('resume', () => {
     console.log('✅ Bot reconnected to Discord');
+});
+
+// Create HTTP server for ping services
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is alive! 🟢');
+});
+
+// Start HTTP server on port 8080 (Render will use this)
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => {
+    console.log(`🌐 HTTP server running on port ${PORT}`);
 });
 
 // Attempt login with retry logic (matching Alliance bot pattern)
