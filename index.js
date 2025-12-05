@@ -12,7 +12,8 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.MessageContent
     ],
     // Enhanced connection settings for better stability (matching Alliance bot)
     rest: {
