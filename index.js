@@ -1,4 +1,4 @@
-const { Client, Collection, GatewayIntentBits, Events, InteractionType, ChannelType } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, Events, InteractionType, ChannelType, ActivityType } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -7,13 +7,23 @@ const DatabaseManager = require('./database.js');
 // Load configuration
 const config = require('./config.js');
 
-// Create Discord client with only allowed intents
+// Create Discord client with only allowed intents and enhanced connection settings
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildVoiceStates
-    ]
+    ],
+    // Enhanced connection settings for better stability (matching Alliance bot)
+    rest: {
+        timeout: 30000, // 30 seconds timeout
+        retries: 3
+    },
+    // WebSocket settings
+    ws: {
+        large_threshold: 250,
+        compress: true
+    }
 });
 
 // Create collections for commands
@@ -41,9 +51,13 @@ for (const file of commandFiles) {
     }
 }
 
-// Bot ready event
-client.once(Events.ClientReady, async () => {
+// Bot ready event - Using 'ready' string to match working Alliance bot pattern
+client.once('ready', async () => {
+    console.log('✅ Client ready event received!');
     console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+    console.log(`🔗 Bot ID: ${client.user.id}`);
+    console.log(`🌍 Connected to ${client.guilds.cache.size} guild(s)`);
+    console.log(`🌐 Gateway: ${client.ws.gateway}`);
     
     // Connect to database
     const dbConnected = await dbManager.connect();
@@ -60,7 +74,7 @@ client.once(Events.ClientReady, async () => {
     }
     
     // Set bot status
-    client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: 'WATCHING' });
+    client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: ActivityType.Watching });
     
     // Test event handler registration
     console.log('🔧 Testing event handler registration...');
@@ -950,13 +964,42 @@ client.on(Events.GuildDelete, guild => {
     console.log(`👋 Bot left guild: ${guild.name} (${guild.id})`);
 });
 
+// Client error handlers - add before login (using string names for compatibility)
+client.on('error', error => {
+    console.error('❌ Discord client error:', error);
+    // Don't exit the process, let Discord.js handle reconnection
+});
+
+client.on('warn', warning => {
+    console.warn('⚠️ Discord client warning:', warning);
+});
+
+client.on('debug', info => {
+    // Only log debug info if DEBUG environment variable is set
+    if (process.env.DEBUG) {
+        console.debug('🔍 Discord debug:', info);
+    }
+});
+
+// Handle rate limits
+client.on('rateLimit', (rateLimitData) => {
+    console.warn('⏱️ Rate limited:', rateLimitData);
+});
+
+// Handle invalid session
+client.on('invalidSession', () => {
+    console.log('🔄 Invalid session, reconnecting...');
+});
+
 // Error handling
 process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
+    console.error('❌ Unhandled promise rejection:', error);
+    console.error('Stack trace:', error.stack);
 });
 
 process.on('uncaughtException', error => {
-    console.error('Uncaught exception:', error);
+    console.error('❌ Uncaught exception:', error);
+    console.error('Stack trace:', error.stack);
     process.exit(1);
 });
 
@@ -987,5 +1030,106 @@ server.listen(PORT, () => {
     console.log(`🌐 HTTP server running on port ${PORT}`);
 });
 
-// Login to Discord
-client.login(config.bot.token);
+// Login to Discord with error handling
+console.log('🚀 Attempting to login to Discord...');
+
+// Check if token exists
+if (!config.bot.token || config.bot.token === '') {
+    console.error('❌ ERROR: Bot token is missing or empty!');
+    console.error('Please set BOT_TOKEN in your .env file or environment variables.');
+    process.exit(1);
+}
+
+// Log connection states - Using string event names to match working Alliance bot pattern
+client.on('shardReady', (id) => {
+    console.log(`✅ Shard ${id} is ready!`);
+});
+
+client.on('shardError', (error, shardId) => {
+    console.error(`❌ Shard ${shardId} error:`, error);
+});
+
+client.on('shardDisconnect', (event, shardId) => {
+    console.warn(`⚠️ Shard ${shardId} disconnected. Code: ${event.code}, Reason: ${event.reason}`);
+});
+
+client.on('shardReconnecting', (shardId) => {
+    console.log(`🔄 Shard ${shardId} is reconnecting...`);
+});
+
+client.on('shardResumed', (id) => {
+    console.log(`✅ Shard ${id} resumed`);
+});
+
+// Handle disconnection and reconnection
+client.on('disconnect', () => {
+    console.log('🔌 Bot disconnected from Discord');
+});
+
+client.on('reconnecting', () => {
+    console.log('🔄 Bot reconnecting to Discord...');
+});
+
+client.on('resume', () => {
+    console.log('✅ Bot reconnected to Discord');
+});
+
+// Attempt login with retry logic (matching Alliance bot pattern)
+const loginWithRetry = async (retries = 3) => {
+    // Validate token before attempting login
+    if (!config.bot.token || config.bot.token.trim().length === 0) {
+        console.error('❌ BOT_TOKEN is missing or empty!');
+        console.error('Please set BOT_TOKEN in your Render environment variables.');
+        console.error('Go to your Render dashboard > Environment > Add BOT_TOKEN');
+        process.exit(1);
+    }
+
+    // Basic token format validation (Discord bot tokens typically start with specific patterns)
+    if (config.bot.token.length < 50) {
+        console.error('❌ BOT_TOKEN appears to be invalid (too short).');
+        console.error('Discord bot tokens are typically 59+ characters long.');
+        console.error('Please verify your BOT_TOKEN in Render environment variables.');
+        process.exit(1);
+    }
+
+    try {
+        console.log('🔑 Attempting to login with token:', config.bot.token ? config.bot.token.substring(0, 10) + '...' : 'undefined');
+        console.log('📏 Token length:', config.bot.token.length);
+        await client.login(config.bot.token);
+        console.log('✅ Successfully logged in to Discord');
+    } catch (error) {
+        console.error('❌ Login failed:', error.message);
+        console.error('Error details:', {
+            message: error.message,
+            code: error.code,
+            status: error.status,
+            stack: error.stack
+        });
+        
+        // Provide helpful error messages
+        if (error.message.includes('invalid token') || error.message.includes('401')) {
+            console.error('💡 Troubleshooting tips:');
+            console.error('   1. Verify your BOT_TOKEN in Render dashboard > Environment');
+            console.error('   2. Make sure there are no extra spaces or quotes around the token');
+            console.error('   3. Check if the token was regenerated - you may need a new one');
+            console.error('   4. Go to https://discord.com/developers/applications to get a fresh token');
+        } else if (error.message.includes('ENOTFOUND') || error.message.includes('ECONNREFUSED')) {
+            console.error('💡 Tip: Unable to connect to Discord servers. Check your internet connection.');
+        } else if (error.message.includes('rate limit')) {
+            console.error('💡 Tip: Rate limited by Discord. Please wait before trying again.');
+        }
+        
+        if (retries > 0) {
+            console.log(`🔄 Retrying login in 5 seconds... (${retries} attempts left)`);
+            setTimeout(() => {
+                loginWithRetry(retries - 1);
+            }, 5000);
+        } else {
+            console.error('❌ Max login attempts reached. Exiting...');
+            process.exit(1);
+        }
+    }
+};
+
+// Start the bot
+loginWithRetry();
