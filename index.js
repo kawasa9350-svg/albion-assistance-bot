@@ -7,14 +7,6 @@ const DatabaseManager = require('./database.js');
 // Load configuration
 const config = require('./config.js');
 
-// Log configuration status (without exposing sensitive data)
-console.log('📋 Configuration loaded:');
-console.log(`   - Bot token present: ${!!config.bot.token && config.bot.token.trim() !== '' ? '✅ Yes' : '❌ No'}`);
-console.log(`   - Application ID: ${config.bot.applicationId || 'Not set'}`);
-console.log(`   - Guild ID: ${config.development.guildId || 'Not set'}`);
-console.log(`   - Database URI present: ${!!config.database.uri && config.database.uri.trim() !== '' ? '✅ Yes' : '❌ No'}`);
-console.log(`   - Database name: ${config.database.databaseName || 'Not set'}`);
-
 // Create Discord client with only allowed intents
 const client = new Client({
     intents: [
@@ -27,12 +19,6 @@ const client = new Client({
 // Create collections for commands
 client.commands = new Collection();
 client.cooldowns = new Collection();
-
-// Connection tracking variables (for timeout monitoring)
-let connectionEstablished = false;
-let loginResolved = false;
-let connectionTimeout = null;
-let readyTimeout = null;
 
 // Initialize database manager
 const dbManager = new DatabaseManager();
@@ -57,13 +43,7 @@ for (const file of commandFiles) {
 
 // Bot ready event
 client.once(Events.ClientReady, async () => {
-    connectionEstablished = true;
-    // Clear connection timeouts
-    if (connectionTimeout) clearTimeout(connectionTimeout);
-    if (readyTimeout) clearTimeout(readyTimeout);
-    
     console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
-    console.log(`🆔 Bot ID: ${client.user.id}`);
     
     // Connect to database
     const dbConnected = await dbManager.connect();
@@ -85,13 +65,6 @@ client.once(Events.ClientReady, async () => {
     // Test event handler registration
     console.log('🔧 Testing event handler registration...');
     console.log(`MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
-    
-    // Log guild information
-    const guilds = client.guilds.cache;
-    console.log(`📊 Connected to ${guilds.size} guild(s):`);
-    guilds.forEach(guild => {
-        console.log(`   - ${guild.name} (${guild.id})`);
-    });
 });
 
 // Helper function to load all event signups for all guilds
@@ -977,67 +950,13 @@ client.on(Events.GuildDelete, guild => {
     console.log(`👋 Bot left guild: ${guild.name} (${guild.id})`);
 });
 
-// Discord client error handlers
-client.on(Events.Error, error => {
-    console.error('❌ Discord client error:', error);
-    console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        name: error.name
-    });
-});
-
-client.on(Events.Warn, warning => {
-    console.warn('⚠️ Discord client warning:', warning);
-});
-
-// Enable debug logging to see connection details
-client.on(Events.Debug, info => {
-    // Log important debug info even in production for troubleshooting
-    if (info.includes('WS') || info.includes('Heartbeat') || info.includes('READY') || info.includes('GUILD')) {
-        console.log('🔍 Discord debug:', info);
-    } else if (process.env.NODE_ENV === 'development') {
-        console.debug('🔍 Discord debug:', info);
-    }
-});
-
-// Monitor shard events to track connection status
-client.on(Events.ShardReady, (id) => {
-    console.log(`🔗 Shard ${id} ready - Gateway connection established`);
-});
-
-client.on(Events.ShardResume, (id) => {
-    console.log(`🔄 Shard ${id} resumed connection`);
-});
-
-client.on(Events.ShardReconnecting, (id) => {
-    console.log(`🔄 Shard ${id} reconnecting...`);
-});
-
-client.on(Events.ShardDisconnect, (event, id) => {
-    console.error(`🔌 Shard ${id} disconnected:`, event.reason || 'Unknown reason');
-    console.error('Close code:', event.code);
-});
-
-client.on(Events.ShardError, (error, id) => {
-    console.error(`❌ Shard ${id} error:`, error);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-});
-
 // Error handling
 process.on('unhandledRejection', error => {
-    console.error('❌ Unhandled promise rejection:', error);
-    if (error.stack) {
-        console.error('Stack trace:', error.stack);
-    }
+    console.error('Unhandled promise rejection:', error);
 });
 
 process.on('uncaughtException', error => {
-    console.error('❌ Uncaught exception:', error);
-    if (error.stack) {
-        console.error('Stack trace:', error.stack);
-    }
+    console.error('Uncaught exception:', error);
     process.exit(1);
 });
 
@@ -1068,110 +987,5 @@ server.listen(PORT, () => {
     console.log(`🌐 HTTP server running on port ${PORT}`);
 });
 
-// Validate bot token before attempting login
-console.log('🔐 Validating bot token...');
-if (!config.bot.token || config.bot.token.trim() === '') {
-    console.error('❌ ERROR: BOT_TOKEN is missing or empty!');
-    console.error('Please set the BOT_TOKEN environment variable in your Render dashboard.');
-    process.exit(1);
-}
-
-// Check if token looks valid (basic validation)
-if (config.bot.token.length < 50) {
-    console.error('❌ ERROR: BOT_TOKEN appears to be invalid (too short)!');
-    console.error('Please check the BOT_TOKEN environment variable in your Render dashboard.');
-    process.exit(1);
-}
-
-console.log('✅ Bot token validated (length check passed)');
-console.log('🔌 Attempting to connect to Discord...');
-
-// Set up connection timeout (30 seconds for initial connection)
-const CONNECTION_TIMEOUT = 30000;
-const READY_TIMEOUT = 60000; // 60 seconds for full ready state
-
-console.log(`⏱️ Setting connection timeout: ${CONNECTION_TIMEOUT/1000}s for connection, ${READY_TIMEOUT/1000}s for ready state`);
-
-// Connection timeout - detects if we can't connect at all
-connectionTimeout = setTimeout(() => {
-    if (!loginResolved) {
-        console.error('❌ CONNECTION TIMEOUT: Failed to establish connection within 30 seconds');
-        console.error('💡 Possible causes:');
-        console.error('   1. Invalid bot token');
-        console.error('   2. Network/firewall blocking Discord API');
-        console.error('   3. Discord API is down or experiencing issues');
-        console.error('   4. Bot application was deleted');
-        console.error('\n🔍 Check Render logs above for any error messages');
-        process.exit(1);
-    }
-}, CONNECTION_TIMEOUT);
-
-// Ready timeout - detects if login works but ready never fires
-readyTimeout = setTimeout(() => {
-    if (!connectionEstablished) {
-        console.error('❌ READY TIMEOUT: Login succeeded but ClientReady event never fired');
-        console.error('💡 This usually means:');
-        console.error('   1. Gateway connection failed after authentication');
-        console.error('   2. Bot intents are missing or incorrect');
-        console.error('   3. Bot doesn\'t have permission to access gateway');
-        console.error('   4. Network issues preventing gateway handshake');
-        console.error('\n🔍 Next steps:');
-        console.error('   1. Verify bot intents in Discord Developer Portal');
-        console.error('   2. Check if bot is banned or restricted');
-        console.error('   3. Try resetting the bot token');
-        process.exit(1);
-    }
-}, READY_TIMEOUT);
-
-// Login to Discord with comprehensive error handling
-client.login(config.bot.token)
-    .then(() => {
-        loginResolved = true;
-        clearTimeout(connectionTimeout);
-        console.log('✅ Login promise resolved - Gateway connection initiated');
-        console.log('⏳ Waiting for Discord Gateway to confirm connection...');
-        console.log('   (This usually takes 1-5 seconds)');
-        
-        // Give additional status update after 10 seconds
-        setTimeout(() => {
-            if (!connectionEstablished) {
-                console.log('⏳ Still waiting for ready event... (this may take up to 60 seconds)');
-                console.log('🔍 Check logs above for any shard or gateway errors');
-            }
-        }, 10000);
-    })
-    .catch(error => {
-        loginResolved = true;
-        clearTimeout(connectionTimeout);
-        clearTimeout(readyTimeout);
-        console.error('❌ FAILED TO LOGIN TO DISCORD');
-        console.error('Error:', error.message);
-        console.error('Error code:', error.code);
-        console.error('Error name:', error.name);
-        if (error.stack) {
-            console.error('Stack trace:', error.stack);
-        }
-        
-        console.error('\n💡 Common issues and solutions:');
-        
-        if (error.message.includes('Invalid') || error.message.includes('token')) {
-            console.error('   ❌ INVALID TOKEN:');
-            console.error('      1. Go to https://discord.com/developers/applications');
-            console.error('      2. Select your application');
-            console.error('      3. Go to "Bot" section');
-            console.error('      4. Click "Reset Token" to get a fresh token');
-            console.error('      5. Copy the NEW token and update BOT_TOKEN in Render');
-        } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-            console.error('   ❌ NETWORK ERROR:');
-            console.error('      - Check your network connectivity');
-            console.error('      - Verify Discord API is accessible from Render');
-            console.error('      - Check firewall settings');
-        } else {
-            console.error('   ❌ UNKNOWN ERROR:');
-            console.error('      - Check Discord status: https://discordstatus.com');
-            console.error('      - Verify bot application still exists');
-            console.error('      - Try resetting the bot token');
-        }
-        
-        process.exit(1);
-    });
+// Login to Discord
+client.login(config.bot.token);
