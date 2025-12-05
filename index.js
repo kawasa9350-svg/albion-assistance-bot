@@ -7,6 +7,14 @@ const DatabaseManager = require('./database.js');
 // Load configuration
 const config = require('./config.js');
 
+// Log configuration status (without exposing sensitive data)
+console.log('📋 Configuration loaded:');
+console.log(`   - Bot token present: ${!!config.bot.token && config.bot.token.trim() !== '' ? '✅ Yes' : '❌ No'}`);
+console.log(`   - Application ID: ${config.bot.applicationId || 'Not set'}`);
+console.log(`   - Guild ID: ${config.development.guildId || 'Not set'}`);
+console.log(`   - Database URI present: ${!!config.database.uri && config.database.uri.trim() !== '' ? '✅ Yes' : '❌ No'}`);
+console.log(`   - Database name: ${config.database.databaseName || 'Not set'}`);
+
 // Create Discord client with only allowed intents
 const client = new Client({
     intents: [
@@ -950,13 +958,35 @@ client.on(Events.GuildDelete, guild => {
     console.log(`👋 Bot left guild: ${guild.name} (${guild.id})`);
 });
 
+// Discord client error handlers
+client.on(Events.Error, error => {
+    console.error('❌ Discord client error:', error);
+});
+
+client.on(Events.Warn, warning => {
+    console.warn('⚠️ Discord client warning:', warning);
+});
+
+client.on(Events.Debug, info => {
+    // Only log debug in development
+    if (process.env.NODE_ENV === 'development') {
+        console.debug('🔍 Discord debug:', info);
+    }
+});
+
 // Error handling
 process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
+    console.error('❌ Unhandled promise rejection:', error);
+    if (error.stack) {
+        console.error('Stack trace:', error.stack);
+    }
 });
 
 process.on('uncaughtException', error => {
-    console.error('Uncaught exception:', error);
+    console.error('❌ Uncaught exception:', error);
+    if (error.stack) {
+        console.error('Stack trace:', error.stack);
+    }
     process.exit(1);
 });
 
@@ -987,5 +1017,40 @@ server.listen(PORT, () => {
     console.log(`🌐 HTTP server running on port ${PORT}`);
 });
 
-// Login to Discord
-client.login(config.bot.token);
+// Validate bot token before attempting login
+console.log('🔐 Validating bot token...');
+if (!config.bot.token || config.bot.token.trim() === '') {
+    console.error('❌ ERROR: BOT_TOKEN is missing or empty!');
+    console.error('Please set the BOT_TOKEN environment variable in your Render dashboard.');
+    process.exit(1);
+}
+
+// Check if token looks valid (basic validation)
+if (config.bot.token.length < 50) {
+    console.error('❌ ERROR: BOT_TOKEN appears to be invalid (too short)!');
+    console.error('Please check the BOT_TOKEN environment variable in your Render dashboard.');
+    process.exit(1);
+}
+
+console.log('✅ Bot token validated (length check passed)');
+console.log('🔌 Attempting to connect to Discord...');
+
+// Login to Discord with error handling
+client.login(config.bot.token)
+    .then(() => {
+        console.log('✅ Login promise resolved successfully');
+    })
+    .catch(error => {
+        console.error('❌ Failed to login to Discord:', error);
+        console.error('Error details:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack
+        });
+        console.error('\n💡 Common issues:');
+        console.error('  1. Invalid or expired bot token');
+        console.error('  2. Bot token not set in environment variables');
+        console.error('  3. Bot has been removed from Discord Developer Portal');
+        console.error('  4. Network connectivity issues');
+        process.exit(1);
+    });
