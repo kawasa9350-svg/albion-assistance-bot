@@ -11,14 +11,54 @@ class DatabaseManager {
 
     async connect() {
         try {
-            this.client = new MongoClient(this.config.database.uri);
+            // Optimize MongoDB connection with connection pooling
+            this.client = new MongoClient(this.config.database.uri, {
+                maxPoolSize: 10,
+                minPoolSize: 2,
+                maxIdleTimeMS: 30000,
+                serverSelectionTimeoutMS: 5000,
+                socketTimeoutMS: 45000,
+            });
             await this.client.connect();
             this.db = this.client.db(this.config.database.databaseName);
-            console.log('✅ Connected to MongoDB successfully!');
+            
+            // Create indexes for better query performance
+            await this.createIndexes();
+            
+            const isDev = process.env.NODE_ENV !== 'production';
+            if (isDev) console.log('✅ Connected to MongoDB successfully!');
             return true;
         } catch (error) {
             console.error('❌ Failed to connect to MongoDB:', error);
             return false;
+        }
+    }
+
+    async createIndexes() {
+        try {
+            // Get all collections and create indexes
+            const collections = await this.db.listCollections().toArray();
+            
+            for (const collectionInfo of collections) {
+                if (collectionInfo.name.startsWith('guild_')) {
+                    const collection = this.db.collection(collectionInfo.name);
+                    
+                    // Create indexes for frequently queried fields
+                    await collection.createIndex({ guildId: 1 });
+                    await collection.createIndex({ type: 1, guildId: 1 });
+                    await collection.createIndex({ type: 1, name: 1, guildId: 1 });
+                    await collection.createIndex({ compId: 1 });
+                    await collection.createIndex({ regearId: 1 });
+                    await collection.createIndex({ 'builds.buildId': 1 });
+                }
+            }
+            
+            const isDev = process.env.NODE_ENV !== 'production';
+            if (isDev) console.log('✅ Database indexes created');
+        } catch (error) {
+            // Don't fail if indexes already exist
+            const isDev = process.env.NODE_ENV !== 'production';
+            if (isDev) console.log('⚠️ Index creation note:', error.message);
         }
     }
 

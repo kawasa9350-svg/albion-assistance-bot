@@ -31,46 +31,54 @@ for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     const command = require(filePath);
     
-    if ('data' in command && 'execute' in command) {
-        // Pass the database manager to the command
-        command.dbManager = dbManager;
-        client.commands.set(command.data.name, command);
-        console.log(`✅ Loaded command: ${command.data.name}`);
-    } else {
-        console.log(`⚠️ Command at ${filePath} is missing required properties`);
-    }
+        if ('data' in command && 'execute' in command) {
+            // Pass the database manager to the command
+            command.dbManager = dbManager;
+            client.commands.set(command.data.name, command);
+            const isDev = process.env.NODE_ENV !== 'production';
+            if (isDev) console.log(`✅ Loaded command: ${command.data.name}`);
+        } else {
+            console.log(`⚠️ Command at ${filePath} is missing required properties`);
+        }
 }
 
 // Bot ready event
 client.once(Events.ClientReady, async () => {
-    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (isDev) console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
     
     // Connect to database
     const dbConnected = await dbManager.connect();
     if (dbConnected) {
-        console.log('📊 Database connection established');
+        if (isDev) console.log('📊 Database connection established');
         
-        // Load all event signups for all guilds to ensure we have current state after bot reset
-        await loadAllEventSignupsForAllGuilds();
+        // Load data in background (non-blocking) to speed up startup
+        // Don't await - let it load in the background
+        loadAllEventSignupsForAllGuilds().catch(err => {
+            console.error('Error loading event signups:', err);
+        });
         
-        // Load all voice channel setups for all guilds
-        await loadAllVoiceChannelSetups();
+        loadAllVoiceChannelSetups().catch(err => {
+            console.error('Error loading voice channel setups:', err);
+        });
     } else {
-        console.log('❌ Failed to connect to database');
+        console.error('❌ Failed to connect to database');
     }
     
     // Set bot status
     client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: 'WATCHING' });
     
-    // Test event handler registration
-    console.log('🔧 Testing event handler registration...');
-    console.log(`MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
+    if (isDev) {
+        console.log('🔧 Testing event handler registration...');
+        console.log(`MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
+    }
 });
 
 // Helper function to load all event signups for all guilds
 async function loadAllEventSignupsForAllGuilds() {
     try {
-        console.log('🔄 Loading all event signups for all guilds...');
+        const isDev = process.env.NODE_ENV !== 'production';
+        if (isDev) console.log('🔄 Loading all event signups for all guilds...');
         
         // Initialize event signups storage if it doesn't exist
         if (!client.eventSignups) {
@@ -79,14 +87,16 @@ async function loadAllEventSignupsForAllGuilds() {
         
         // Get all guilds the bot is in
         const guilds = client.guilds.cache;
-        console.log(`Found ${guilds.size} guilds`);
+        if (isDev) console.log(`Found ${guilds.size} guilds`);
         
-        // Load event signups for each guild
-        for (const [guildId, guild] of guilds) {
+        // Load event signups for each guild in parallel (faster)
+        const loadPromises = Array.from(guilds.entries()).map(async ([guildId, guild]) => {
             try {
                 // Get all events for this guild
                 const events = await dbManager.getEvents(guildId);
-                console.log(`Loading signups for ${events.length} events in guild: ${guild.name}`);
+                if (isDev && events.length > 0) {
+                    console.log(`Loading signups for ${events.length} events in guild: ${guild.name}`);
+                }
                 
                 // Load signups for each event
                 for (const event of events) {
@@ -94,14 +104,15 @@ async function loadAllEventSignupsForAllGuilds() {
                     existingSignups.forEach((signups, key) => {
                         client.eventSignups.set(key, signups);
                     });
-                    console.log(`Loaded ${existingSignups.size} signup entries for event: ${event.name} in guild: ${guild.name}`);
                 }
             } catch (error) {
                 console.error(`Error loading event signups for guild ${guild.name}:`, error);
             }
-        }
+        });
         
-        console.log(`✅ Total signup entries loaded across all guilds: ${client.eventSignups.size}`);
+        await Promise.all(loadPromises);
+        
+        if (isDev) console.log(`✅ Total signup entries loaded across all guilds: ${client.eventSignups.size}`);
     } catch (error) {
         console.error('Error loading all event signups for all guilds:', error);
     }
@@ -110,7 +121,8 @@ async function loadAllEventSignupsForAllGuilds() {
 // Helper function to load all voice channel setups for all guilds
 async function loadAllVoiceChannelSetups() {
     try {
-        console.log('🔄 Loading all voice channel setups for all guilds...');
+        const isDev = process.env.NODE_ENV !== 'production';
+        if (isDev) console.log('🔄 Loading all voice channel setups for all guilds...');
         
         // Initialize voice channel setups storage if it doesn't exist
         if (!client.voiceChannelSetups) {
@@ -124,22 +136,23 @@ async function loadAllVoiceChannelSetups() {
         
         // Get all guilds the bot is in
         const guilds = client.guilds.cache;
-        console.log(`Found ${guilds.size} guilds`);
         
-        // Load voice channel setups for each guild
-        for (const [guildId, guild] of guilds) {
+        // Load voice channel setups in parallel (faster)
+        const loadPromises = Array.from(guilds.entries()).map(async ([guildId, guild]) => {
             try {
                 const setup = await dbManager.getVoiceChannelSetup(guildId);
                 if (setup) {
                     client.voiceChannelSetups.set(guildId, setup);
-                    console.log(`Loaded voice channel setup for guild: ${guild.name}`);
+                    if (isDev) console.log(`Loaded voice channel setup for guild: ${guild.name}`);
                 }
             } catch (error) {
                 console.error(`Error loading voice channel setup for guild ${guild.name}:`, error);
             }
-        }
+        });
         
-        console.log(`✅ Total voice channel setups loaded: ${client.voiceChannelSetups.size}`);
+        await Promise.all(loadPromises);
+        
+        if (isDev) console.log(`✅ Total voice channel setups loaded: ${client.voiceChannelSetups.size}`);
     } catch (error) {
         console.error('Error loading all voice channel setups for all guilds:', error);
     }
@@ -147,18 +160,21 @@ async function loadAllVoiceChannelSetups() {
 
 // Message delete event - handle cleanup of signup and event data when messages are deleted
 client.on(Events.MessageDelete, async (message) => {
-    console.log(`🔍 MESSAGE DELETE EVENT TRIGGERED - Message ID: ${message.id}`);
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (isDev) console.log(`🔍 MESSAGE DELETE EVENT TRIGGERED - Message ID: ${message.id}`);
     
     try {
-        console.log(`🔍 Message deletion detected:`, {
-            messageId: message.id,
-            guildId: message.guildId,
-            channelId: message.channelId,
-            authorId: message.author?.id,
-            isBotMessage: message.author?.id === client.user.id,
-            hasEmbeds: message.embeds && message.embeds.length > 0,
-            embedTitle: message.embeds?.[0]?.title || 'No title'
-        });
+        if (isDev) {
+            console.log(`🔍 Message deletion detected:`, {
+                messageId: message.id,
+                guildId: message.guildId,
+                channelId: message.channelId,
+                authorId: message.author?.id,
+                isBotMessage: message.author?.id === client.user.id,
+                hasEmbeds: message.embeds && message.embeds.length > 0,
+                embedTitle: message.embeds?.[0]?.title || 'No title'
+            });
+        }
         
         // Check if this is a message from our bot
         if (message.author && message.author.id === client.user.id && 
@@ -167,11 +183,11 @@ client.on(Events.MessageDelete, async (message) => {
             const embed = message.embeds[0];
             const title = embed.title || '';
             
-            console.log(`📝 Processing bot message deletion with title: "${title}"`);
+            if (isDev) console.log(`📝 Processing bot message deletion with title: "${title}"`);
             
             // Handle signup message deletion
             if (title.startsWith('📝 Build Signup')) {
-                console.log('Signup message deleted, cleaning up database signups');
+                if (isDev) console.log('Signup message deleted, cleaning up database signups');
                 
                 // Extract composition name and session ID from the embed description
                 const description = embed.description || '';
@@ -199,7 +215,7 @@ client.on(Events.MessageDelete, async (message) => {
                     }
                     
                     if (sessionId) {
-                        console.log(`Cleaning up signups for composition: ${compName}, session: ${sessionId}`);
+                        if (isDev) console.log(`Cleaning up signups for composition: ${compName}, session: ${sessionId}`);
                         
                         // Clean up signups for this specific session from database
                         await dbManager.cleanupCompositionSignups(message.guildId, compName, sessionId);
@@ -213,9 +229,9 @@ client.on(Events.MessageDelete, async (message) => {
                             }
                         }
                         
-                        console.log(`✅ Cleaned up signups for composition: ${compName}, session: ${sessionId}`);
+                        if (isDev) console.log(`✅ Cleaned up signups for composition: ${compName}, session: ${sessionId}`);
                     } else {
-                        console.log(`Could not determine session ID for composition: ${compName}, cleaning up all signups`);
+                        if (isDev) console.log(`Could not determine session ID for composition: ${compName}, cleaning up all signups`);
                         
                         // Fallback: clean up all signups for this composition from database
                         await dbManager.cleanupCompositionSignups(message.guildId, compName);
@@ -229,16 +245,18 @@ client.on(Events.MessageDelete, async (message) => {
                             }
                         }
                         
-                        console.log(`✅ Cleaned up all signups for composition: ${compName}`);
+                        if (isDev) console.log(`✅ Cleaned up all signups for composition: ${compName}`);
                     }
                 }
             }
             
             // Handle event message deletion
             else if (title.includes('📅') || title.includes('**') || title.toLowerCase().includes('event')) {
-                console.log('🎯 EVENT MESSAGE DELETION DETECTED!');
-                console.log('Event message deleted, cleaning up database event and signups');
-                console.log(`Message details: Guild ID: ${message.guildId}, Title: "${title}"`);
+                if (isDev) {
+                    console.log('🎯 EVENT MESSAGE DELETION DETECTED!');
+                    console.log('Event message deleted, cleaning up database event and signups');
+                    console.log(`Message details: Guild ID: ${message.guildId}, Title: "${title}"`);
+                }
                 
                 // Extract event name from the title (format: "📅 **Event Name**")
                 let eventName = null;
@@ -255,54 +273,41 @@ client.on(Events.MessageDelete, async (message) => {
                     const match = title.match(pattern);
                     if (match && match[1] && match[1].trim()) {
                         eventName = match[1].trim();
-                        console.log(`Extracted event name using pattern ${pattern.source}: "${eventName}"`);
+                        if (isDev) console.log(`Extracted event name using pattern ${pattern.source}: "${eventName}"`);
                         break;
                     }
                 }
                 
                 if (eventName) {
-                    console.log(`Final extracted event name: "${eventName}"`);
-                    console.log(`Cleaning up event and signups for event: ${eventName} in guild: ${message.guildId}`);
+                    if (isDev) {
+                        console.log(`Final extracted event name: "${eventName}"`);
+                        console.log(`Cleaning up event and signups for event: ${eventName} in guild: ${message.guildId}`);
+                    }
                     
                     try {
                         // First, verify the event exists in the database
                         const events = await dbManager.getEvents(message.guildId);
                         const eventExists = events.find(e => e.name === eventName);
-                        console.log(`Event "${eventName}" exists in database: ${!!eventExists}`);
                         
                         if (eventExists) {
-                            console.log(`Event details:`, eventExists);
-                            
                             // Clean up event signups from database
-                            console.log(`Cleaning up event signups...`);
                             const signupCleanupResult = await dbManager.cleanupEventSignups(message.guildId, eventName);
-                            console.log(`Signup cleanup result: ${signupCleanupResult}`);
                             
                             // Delete the event itself from database
-                            console.log(`Deleting event from database...`);
                             const deleteResult = await dbManager.deleteEvent(message.guildId, eventName);
-                            console.log(`Event deletion result: ${deleteResult}`);
-                            
-                            // Verify deletion
-                            const eventsAfterDelete = await dbManager.getEvents(message.guildId);
-                            const eventStillExists = eventsAfterDelete.find(e => e.name === eventName);
-                            console.log(`Event still exists after deletion: ${!!eventStillExists}`);
                             
                             // Also clean up from memory if it exists
                             if (client.eventSignups) {
-                                let memoryCleanupCount = 0;
                                 for (const [key] of client.eventSignups) {
                                     if (key.startsWith(`event_${eventName}_`)) {
                                         client.eventSignups.delete(key);
-                                        memoryCleanupCount++;
                                     }
                                 }
-                                console.log(`Cleaned up ${memoryCleanupCount} memory entries`);
                             }
                             
-                            console.log(`✅ Cleaned up event and signups for event: ${eventName}`);
+                            if (isDev) console.log(`✅ Cleaned up event and signups for event: ${eventName}`);
                         } else {
-                            console.log(`⚠️ Event "${eventName}" not found in database, trying fuzzy search...`);
+                            if (isDev) console.log(`⚠️ Event "${eventName}" not found in database, trying fuzzy search...`);
                             
                             // Try fuzzy search through all events to find a match
                             const allEvents = await dbManager.getEvents(message.guildId);
@@ -312,71 +317,41 @@ client.on(Events.MessageDelete, async (message) => {
                             );
                             
                             if (fuzzyMatch) {
-                                console.log(`Found fuzzy match: "${fuzzyMatch.name}" for search term "${eventName}"`);
                                 eventName = fuzzyMatch.name; // Use the actual event name from database
                                 
                                 // Retry cleanup with the correct event name
-                                console.log(`🔄 Retrying cleanup with correct event name: "${eventName}"`);
-                                
                                 try {
-                                    const signupCleanupResult = await dbManager.cleanupEventSignups(message.guildId, eventName);
-                                    const deleteResult = await dbManager.deleteEvent(message.guildId, eventName);
-                                    
-                                    console.log(`Fuzzy match cleanup - Signup cleanup: ${signupCleanupResult}, Event deletion: ${deleteResult}`);
-                                    
-                                    if (deleteResult) {
-                                        console.log(`✅ Fuzzy match cleanup successful for event: ${eventName}`);
-                                    } else {
-                                        console.log(`❌ Fuzzy match cleanup failed for event: ${eventName}`);
-                                    }
+                                    await dbManager.cleanupEventSignups(message.guildId, eventName);
+                                    await dbManager.deleteEvent(message.guildId, eventName);
+                                    if (isDev) console.log(`✅ Fuzzy match cleanup successful for event: ${eventName}`);
                                 } catch (fuzzyError) {
                                     console.error(`❌ Fuzzy match cleanup error:`, fuzzyError);
                                 }
-                            } else {
-                                console.log(`⚠️ No fuzzy match found for event name: "${eventName}"`);
                             }
                         }
                     } catch (error) {
                         console.error(`❌ Error cleaning up event ${eventName}:`, error);
-                        console.error('Full error details:', error);
                         
                         // Even if there's an error, try to force delete the event
-                        console.log(`🔄 Attempting force deletion of event: ${eventName}`);
                         try {
-                            const forceDeleteResult = await dbManager.deleteEvent(message.guildId, eventName);
-                            console.log(`Force delete result: ${forceDeleteResult}`);
-                            
-                            if (forceDeleteResult) {
-                                console.log(`✅ Force deletion successful for event: ${eventName}`);
-                            } else {
-                                console.log(`❌ Force deletion failed for event: ${eventName}`);
-                            }
+                            await dbManager.deleteEvent(message.guildId, eventName);
                         } catch (forceError) {
                             console.error(`❌ Force deletion error:`, forceError);
                         }
                     }
                 } else {
-                    console.log(`⚠️ Could not extract event name from title: "${title}"`);
+                    if (isDev) console.log(`⚠️ Could not extract event name from title: "${title}"`);
                     
                     // Last resort: try to find any event that might match the title
-                    console.log(`🔄 Attempting last resort event search...`);
                     try {
                         const allEvents = await dbManager.getEvents(message.guildId);
-                        console.log(`Available events in guild:`, allEvents.map(e => e.name));
                         
                         // Look for any event that might be in the title
                         for (const event of allEvents) {
                             if (title.toLowerCase().includes(event.name.toLowerCase())) {
-                                console.log(`Found potential match: "${event.name}" in title: "${title}"`);
-                                
-                                // Try to delete this event
-                                const deleteResult = await dbManager.deleteEvent(message.guildId, event.name);
-                                console.log(`Last resort deletion result for "${event.name}": ${deleteResult}`);
-                                
-                                if (deleteResult) {
-                                    console.log(`✅ Last resort deletion successful for event: ${event.name}`);
-                                    break;
-                                }
+                                await dbManager.deleteEvent(message.guildId, event.name);
+                                if (isDev) console.log(`✅ Last resort deletion successful for event: ${event.name}`);
+                                break;
                             }
                         }
                     } catch (lastResortError) {
@@ -975,17 +950,40 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Create HTTP server for ping services
+// Create HTTP server for ping services and health checks
 const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is alive! 🟢');
+    // Health check endpoint to prevent Render spin-down
+    if (req.url === '/health' || req.url === '/') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'ok', 
+            bot: client.user ? 'online' : 'offline',
+            uptime: process.uptime(),
+            timestamp: new Date().toISOString()
+        }));
+    } else {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Bot is alive! 🟢');
+    }
 });
 
 // Start HTTP server on port 8080 (Render will use this)
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-    console.log(`🌐 HTTP server running on port ${PORT}`);
+    const isDev = process.env.NODE_ENV !== 'production';
+    if (isDev) console.log(`🌐 HTTP server running on port ${PORT}`);
 });
+
+// Keep-alive ping every 5 minutes to prevent Render spin-down (free tier)
+if (process.env.NODE_ENV === 'production') {
+    setInterval(() => {
+        http.get(`http://localhost:${PORT}/health`, (res) => {
+            // Just ping to keep service alive
+        }).on('error', () => {
+            // Ignore errors
+        });
+    }, 5 * 60 * 1000); // Every 5 minutes
+}
 
 // Login to Discord
 client.login(config.bot.token);

@@ -16,3 +16,6 @@ services:
         sync: false
       - key: GUILD_ID
         sync: false
+      - key: SKIP_DEPLOY
+        value: false
+        sync: false
