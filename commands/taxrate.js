@@ -53,18 +53,24 @@ module.exports = {
 
             await interaction.respond(choices);
         } catch (error) {
-            console.error('Error in taxrate autocomplete:', error);
             // Don't try to respond if interaction is unknown/expired (error 10062)
+            // This is expected when interactions expire after 3 seconds
             if (error.code === 10062) {
                 console.warn('Autocomplete interaction expired or unknown, skipping response');
                 return;
             }
+            // For other errors, log them as errors
+            console.error('Error in taxrate autocomplete:', error);
             // Only try to respond if interaction is still valid
             try {
                 await interaction.respond([]);
             } catch (respondError) {
-                // If responding fails, log but don't throw (interaction may have expired)
-                console.error('Failed to respond to autocomplete:', respondError);
+                // If responding fails, check if it's also an expired interaction
+                if (respondError.code === 10062) {
+                    console.warn('Autocomplete interaction expired during error recovery');
+                } else {
+                    console.error('Failed to respond to autocomplete:', respondError);
+                }
             }
         }
     },
