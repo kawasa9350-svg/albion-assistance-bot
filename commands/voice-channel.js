@@ -259,35 +259,35 @@ module.exports = {
     // Handle voice state updates for join-to-create functionality
     async handleVoiceStateUpdate(oldState, newState, client) {
         try {
+            const guildId = newState.guild.id;
+            const setup = client.voiceChannelSetups?.get(guildId);
+            
+            // Early return if no setup for this guild
+            if (!setup) return;
+
             // Check if user joined a voice channel
             if (!oldState.channelId && newState.channelId) {
-                const guildId = newState.guild.id;
-                const setup = client.voiceChannelSetups?.get(guildId);
-                
-                if (setup && newState.channelId === setup.channelId) {
+                if (newState.channelId === setup.channelId) {
                     console.log(`🎯 User joined join-to-create channel, creating temporary channel`);
                     // User joined the join-to-create channel
                     await this.createTemporaryChannel(newState, setup);
                 }
+                return;
             }
 
             // Check if user left a voice channel
             if (oldState.channelId && !newState.channelId) {
                 await this.cleanupEmptyChannel(oldState);
-                // Also check all channels in the guild for cleanup
-                await this.checkAllChannelsForCleanup(newState.guild);
+                return;
             }
 
             // Check if user moved between channels
             if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+                // Clean up the channel they left
                 await this.cleanupEmptyChannel(oldState);
-                // Also check all channels in the guild for cleanup
-                await this.checkAllChannelsForCleanup(newState.guild);
                 
-                const guildId = newState.guild.id;
-                const setup = client.voiceChannelSetups?.get(guildId);
-                
-                if (setup && newState.channelId === setup.channelId) {
+                // Check if they moved to the join-to-create channel
+                if (newState.channelId === setup.channelId) {
                     console.log(`🎯 User moved to join-to-create channel, creating temporary channel`);
                     // User moved to the join-to-create channel
                     await this.createTemporaryChannel(newState, setup);
@@ -365,31 +365,45 @@ module.exports = {
         try {
             const channel = voiceState.channel;
             
+            // Early returns for invalid channels
             if (!channel || channel.type !== ChannelType.GuildVoice) {
                 return;
             }
 
-            // Check if channel is empty
-            if (channel.members.size === 0) {
-                const guildId = voiceState.guild.id;
-                const setup = voiceState.client.voiceChannelSetups?.get(guildId);
-                const temporaryChannels = voiceState.client.temporaryChannels?.get(guildId);
+            // Early return if channel is not empty
+            if (channel.members.size > 0) {
+                return;
+            }
+
+            const guildId = voiceState.guild.id;
+            const setup = voiceState.client.voiceChannelSetups?.get(guildId);
+            
+            // Early return if no setup for this guild
+            if (!setup) {
+                return;
+            }
+
+            // Don't delete the join-to-create channel itself
+            if (channel.id === setup.channelId) {
+                return;
+            }
+
+            const temporaryChannels = voiceState.client.temporaryChannels?.get(guildId);
+            
+            // Only delete if this channel is tracked as a temporary channel (created by our bot)
+            if (temporaryChannels && temporaryChannels.has(channel.id)) {
+                // This is a temporary channel created by our bot, delete it immediately when empty
+                console.log(`🗑️ Deleting empty temporary voice channel: ${channel.name} (ID: ${channel.id})`);
                 
-                // Only delete if:
-                // 1. There's a voice channel setup for this guild
-                // 2. This is not the join-to-create channel itself
-                // 3. This channel is tracked as a temporary channel (created by our bot)
-                if (setup && 
-                    channel.id !== setup.channelId && 
-                    temporaryChannels && temporaryChannels.has(channel.id)) {
-                    
-                    // This is a temporary channel created by our bot, delete it immediately when empty
-                    console.log(`🗑️ Deleting empty temporary voice channel: ${channel.name} (ID: ${channel.id})`);
+                try {
                     await channel.delete();
-                    
                     // Remove from tracking
                     temporaryChannels.delete(channel.id);
                     console.log(`✅ Successfully deleted empty temporary voice channel: ${channel.name}`);
+                } catch (deleteError) {
+                    console.error(`❌ Failed to delete channel ${channel.id}:`, deleteError);
+                    // Remove from tracking if deletion failed (channel might already be deleted)
+                    temporaryChannels.delete(channel.id);
                 }
             }
 
@@ -398,7 +412,8 @@ module.exports = {
         }
     },
 
-    // New method to check all channels for cleanup
+    // Method to check all channels for cleanup (called periodically, not on every voice state update)
+    // This is useful for cleanup in case channels weren't deleted properly
     async checkAllChannelsForCleanup(guild) {
         try {
             const setup = guild.client.voiceChannelSetups?.get(guild.id);
@@ -407,8 +422,11 @@ module.exports = {
             const temporaryChannels = guild.client.temporaryChannels?.get(guild.id);
             if (!temporaryChannels || temporaryChannels.size === 0) return;
 
+            // Create a copy of the set to avoid modification during iteration
+            const channelsToCheck = Array.from(temporaryChannels);
+
             // Check each tracked temporary channel
-            for (const channelId of temporaryChannels) {
+            for (const channelId of channelsToCheck) {
                 try {
                     const channel = guild.channels.cache.get(channelId);
                     
