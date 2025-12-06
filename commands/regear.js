@@ -519,60 +519,94 @@ module.exports = {
     },
 
     async handleSelectMenuInteraction(interaction, db) {
-        const customId = interaction.customId;
-        
-        if (!customId.startsWith('regear_')) {
-            return false;
-        }
-
-        // Defer the update
-        await interaction.deferUpdate();
-
-        // Get current selections from the embed
-        const currentEmbed = interaction.message.embeds[0];
-        let currentSelections = parseSelectionsFromEmbed(currentEmbed);
-
-        // Handle tier selection (only on page 1)
-        if (customId === 'regear_tier') {
-            if (interaction.values.length === 0 || interaction.values[0] === 'none') {
-                // Clear tier selection
-                delete currentSelections.selectedTier;
-                delete currentSelections.tierConfirmed;
-            } else {
-                const selectedTier = interaction.values[0];
-                currentSelections.selectedTier = selectedTier;
-                // Don't set tierConfirmed here - wait for confirm button
-            }
-        } else {
-            // Handle slot selection
-            const slot = customId.replace('regear_', '');
+        try {
+            const customId = interaction.customId;
             
-            if (!VALID_SLOTS.includes(slot)) {
-                await interaction.followUp({ content: 'Invalid slot selected.', ephemeral: true });
-                return true;
+            if (!customId.startsWith('regear_')) {
+                return false;
             }
 
-            // Handle deselection
-            if (interaction.values.length === 0 || interaction.values[0] === 'none') {
-                // Remove selection for this slot
-                delete currentSelections[slot];
+            // Defer the update - check if interaction expired
+            try {
+                await interaction.deferUpdate();
+            } catch (deferError) {
+                if (deferError.code === 10062) {
+                    console.warn('Regear select menu interaction expired during defer');
+                    return true; // Return true to indicate it was handled (even though it expired)
+                }
+                throw deferError; // Re-throw if it's a different error
+            }
+
+            // Get current selections from the embed
+            const currentEmbed = interaction.message.embeds[0];
+            let currentSelections = parseSelectionsFromEmbed(currentEmbed);
+
+            // Handle tier selection (only on page 1)
+            if (customId === 'regear_tier') {
+                if (interaction.values.length === 0 || interaction.values[0] === 'none') {
+                    // Clear tier selection
+                    delete currentSelections.selectedTier;
+                    delete currentSelections.tierConfirmed;
+                } else {
+                    const selectedTier = interaction.values[0];
+                    currentSelections.selectedTier = selectedTier;
+                    // Don't set tierConfirmed here - wait for confirm button
+                }
             } else {
-                // Parse the selected value: name|tierEquivalent|slot
-                const selectedValue = interaction.values[0];
-                const [gearName, tierEquivalent, gearSlot] = selectedValue.split('|');
+                // Handle slot selection
+                const slot = customId.replace('regear_', '');
                 
-                // Store the selection
-                currentSelections[slot] = {
-                    name: gearName,
-                    tierEquivalent: tierEquivalent,
-                    slot: gearSlot
-                };
-            }
-        }
+                if (!VALID_SLOTS.includes(slot)) {
+                    try {
+                        await interaction.followUp({ content: 'Invalid slot selected.', ephemeral: true });
+                    } catch (followUpError) {
+                        if (followUpError.code === 10062) {
+                            console.warn('Regear interaction expired during followUp');
+                        } else {
+                            throw followUpError;
+                        }
+                    }
+                    return true;
+                }
 
-        // Refresh the menu with updated selections
-        await this.showRegearMenu(interaction, db, currentSelections);
-        return true;
+                // Handle deselection
+                if (interaction.values.length === 0 || interaction.values[0] === 'none') {
+                    // Remove selection for this slot
+                    delete currentSelections[slot];
+                } else {
+                    // Parse the selected value: name|tierEquivalent|slot
+                    const selectedValue = interaction.values[0];
+                    const [gearName, tierEquivalent, gearSlot] = selectedValue.split('|');
+                    
+                    // Store the selection
+                    currentSelections[slot] = {
+                        name: gearName,
+                        tierEquivalent: tierEquivalent,
+                        slot: gearSlot
+                    };
+                }
+            }
+
+            // Refresh the menu with updated selections
+            try {
+                await this.showRegearMenu(interaction, db, currentSelections);
+            } catch (menuError) {
+                if (menuError.code === 10062) {
+                    console.warn('Regear interaction expired during menu refresh');
+                } else {
+                    throw menuError;
+                }
+            }
+            return true;
+        } catch (error) {
+            // Check if interaction expired
+            if (error.code === 10062) {
+                console.warn('Regear select menu interaction expired or unknown');
+                return true; // Return true to indicate it was handled
+            }
+            // Re-throw other errors to be handled by global error handler
+            throw error;
+        }
     },
 
     async handleButtonInteraction(interaction, db) {

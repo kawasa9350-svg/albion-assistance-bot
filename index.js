@@ -425,15 +425,18 @@ client.on(Events.InteractionCreate, async interaction => {
             }
         }
     } catch (error) {
+        // Check if interaction expired (code 10062)
+        if (error.code === 10062) {
+            console.warn(`Interaction expired or unknown (type: ${interaction.type})`);
+            return;
+        }
+        
         console.error(`Error handling interaction:`, error);
         
         // Autocomplete interactions can't use reply/followUp, only respond (and only within 3 seconds)
         if (interaction.isAutocomplete()) {
             // If it's an autocomplete interaction that failed, we can't send error messages
             // The error is already logged above
-            if (error.code === 10062) {
-                console.warn('Autocomplete interaction expired or unknown');
-            }
             return;
         }
         
@@ -449,8 +452,13 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.reply(errorMessage);
             }
         } catch (replyError) {
-            // If reply also fails (e.g., interaction expired), just log it
-            console.error('Failed to send error message to user:', replyError);
+            // If reply also fails, check if it's an expired interaction
+            if (replyError.code === 10062) {
+                console.warn('Failed to send error message: interaction expired or unknown');
+            } else {
+                // Only log as error if it's not an expired interaction
+                console.error('Failed to send error message to user:', replyError);
+            }
         }
     }
 });
@@ -920,9 +928,19 @@ client.handleSelectMenuInteraction = async (interaction) => {
         // This is a regear selection
         const regearCommand = client.commands.get('regear');
         if (regearCommand && regearCommand.handleSelectMenuInteraction) {
-            const handled = await regearCommand.handleSelectMenuInteraction(interaction, regearCommand.dbManager);
-            if (!handled) {
-                console.error('Regear select menu interaction was not handled');
+            try {
+                const handled = await regearCommand.handleSelectMenuInteraction(interaction, regearCommand.dbManager);
+                if (!handled) {
+                    console.error('Regear select menu interaction was not handled');
+                }
+            } catch (error) {
+                // Check if interaction expired
+                if (error.code === 10062) {
+                    console.warn('Regear select menu interaction expired');
+                } else {
+                    // Re-throw to be handled by global error handler
+                    throw error;
+                }
             }
         } else {
             console.error('Regear command or handleSelectMenuInteraction method not found');
