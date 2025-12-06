@@ -5,12 +5,6 @@ const path = require('path');
 // Load configuration
 const config = require('./config.js');
 
-// Allow skipping deploy (useful on Render builds if network hangs)
-if (process.env.SKIP_COMMAND_DEPLOY === 'true') {
-    console.log('⏩ SKIP_COMMAND_DEPLOY is true – skipping slash-command deploy.');
-    process.exit(0);
-}
-
 const commands = [];
 const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -34,10 +28,6 @@ const rest = new REST({ version: '10' }).setToken(config.bot.token);
 // Deploy commands
 (async () => {
     try {
-        const timeoutMs = Number(process.env.COMMAND_DEPLOY_TIMEOUT_MS || 30000);
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
         console.log(`🚀 Started refreshing ${commands.length} application (/) commands.`);
 
         let data;
@@ -50,7 +40,7 @@ const rest = new REST({ version: '10' }).setToken(config.bot.token);
             // Deploy commands to specific guild (instant updates)
             data = await rest.put(
                 Routes.applicationGuildCommands(config.bot.applicationId, config.development.guildId),
-                { body: commands, signal: controller.signal },
+                { body: commands },
             );
         } else {
             console.log(`🌍 Deploying commands globally (may take up to 1 hour to update)`);
@@ -58,11 +48,10 @@ const rest = new REST({ version: '10' }).setToken(config.bot.token);
             // Deploy commands globally
             data = await rest.put(
                 Routes.applicationCommands(config.bot.applicationId),
-                { body: commands, signal: controller.signal },
+                { body: commands },
             );
         }
 
-        clearTimeout(timeout);
         console.log(`✅ Successfully reloaded ${data.length} application (/) commands.`);
         
         // List deployed commands
@@ -81,7 +70,5 @@ const rest = new REST({ version: '10' }).setToken(config.bot.token);
         
     } catch (error) {
         console.error('❌ Error deploying commands:', error);
-        console.error('💡 You can set SKIP_COMMAND_DEPLOY=true to skip this step during build.');
-        process.exit(0); // Allow build to continue even if deploy fails
     }
 })();
