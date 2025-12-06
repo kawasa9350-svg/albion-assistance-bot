@@ -675,7 +675,18 @@ module.exports = {
             await interaction.respond([]);
         } catch (error) {
             console.error('Error in inventory autocomplete:', error);
-            await interaction.respond([]);
+            // Don't try to respond if interaction is unknown/expired (error 10062)
+            if (error.code === 10062) {
+                console.warn('Autocomplete interaction expired or unknown, skipping response');
+                return;
+            }
+            // Only try to respond if interaction is still valid
+            try {
+                await interaction.respond([]);
+            } catch (respondError) {
+                // If responding fails, log but don't throw (interaction may have expired)
+                console.error('Failed to respond to autocomplete:', respondError);
+            }
         }
     }
 };

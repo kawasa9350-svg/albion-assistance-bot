@@ -427,15 +427,30 @@ client.on(Events.InteractionCreate, async interaction => {
     } catch (error) {
         console.error(`Error handling interaction:`, error);
         
+        // Autocomplete interactions can't use reply/followUp, only respond (and only within 3 seconds)
+        if (interaction.isAutocomplete()) {
+            // If it's an autocomplete interaction that failed, we can't send error messages
+            // The error is already logged above
+            if (error.code === 10062) {
+                console.warn('Autocomplete interaction expired or unknown');
+            }
+            return;
+        }
+        
         const errorMessage = {
             content: 'There was an error while processing this interaction!',
             ephemeral: true
         };
 
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp(errorMessage);
-        } else {
-            await interaction.reply(errorMessage);
+        try {
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp(errorMessage);
+            } else {
+                await interaction.reply(errorMessage);
+            }
+        } catch (replyError) {
+            // If reply also fails (e.g., interaction expired), just log it
+            console.error('Failed to send error message to user:', replyError);
         }
     }
 });
