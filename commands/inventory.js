@@ -588,32 +588,20 @@ module.exports = {
             }
             
             const db = command.dbManager;
-            
-            // Check if guild is registered
-            if (!(await db.isGuildRegistered(interaction.guildId))) {
-                await interaction.respond([]);
-                return;
-            }
 
             // Handle tier autocomplete
             if (focusedOption.name === 'tier') {
-                // Get all inventory items
-                const inventory = await db.getInventory(interaction.guildId);
-                
-                // Extract unique tier equivalents
-                const uniqueTiers = new Set();
-                inventory.forEach(item => {
-                    uniqueTiers.add(item.tierEquivalent);
-                });
+                // Use optimized method to get unique tiers directly from database
+                const tiers = await db.getUniqueTierEquivalents(interaction.guildId, focusedValue || '');
                 
                 // Sort tiers by tier number (lower first)
-                const sortedTiers = Array.from(uniqueTiers).sort((a, b) => {
+                const sortedTiers = tiers.sort((a, b) => {
                     const tierA = getTierNumber(a);
                     const tierB = getTierNumber(b);
                     return tierA - tierB;
                 });
                 
-                // Filter based on user input
+                // Filter based on user input (if not already filtered by DB query)
                 let filtered = sortedTiers;
                 if (focusedValue && focusedValue.length > 0) {
                     const lowerValue = focusedValue.toLowerCase();
@@ -640,21 +628,15 @@ module.exports = {
                 // Get the selected slot from options
                 const selectedSlot = interaction.options.getString('slot');
                 
-                // Get inventory items filtered by slot if slot is selected
-                const inventory = await db.getInventory(interaction.guildId, selectedSlot || null);
+                // Use optimized method to get unique names directly from database
+                const names = await db.getUniqueInventoryNames(interaction.guildId, selectedSlot || null, focusedValue || '');
                 
-                // Extract unique item names (case-insensitive) from filtered inventory
-                const uniqueNames = new Set();
-                inventory.forEach(item => {
-                    uniqueNames.add(item.name);
-                });
-                
-                // Convert to array and filter based on user input
-                let filtered = Array.from(uniqueNames);
-                
+                // Filter based on user input (contains match, since DB only does prefix match)
+                let filtered = names;
                 if (focusedValue && focusedValue.length > 0) {
-                    filtered = filtered.filter(name => 
-                        name.toLowerCase().includes(focusedValue.toLowerCase())
+                    const lowerValue = focusedValue.toLowerCase();
+                    filtered = names.filter(name => 
+                        name.toLowerCase().includes(lowerValue)
                     );
                 }
                 

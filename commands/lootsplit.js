@@ -34,14 +34,14 @@ module.exports = {
             
             const db = command.dbManager;
             
-            // Check if guild is registered
-            if (!(await db.isGuildRegistered(interaction.guildId))) {
+            // Get available content types (returns empty array if guild not registered)
+            const contentTypes = await db.getContentTypes(interaction.guildId);
+            
+            // If no content types, respond empty immediately
+            if (!contentTypes || contentTypes.length === 0) {
                 await interaction.respond([]);
                 return;
             }
-
-            // Get available content types
-            const contentTypes = await db.getContentTypes(interaction.guildId);
             
             // Filter content types based on user input
             const filtered = contentTypes

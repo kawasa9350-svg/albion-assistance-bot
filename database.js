@@ -1710,6 +1710,58 @@ class DatabaseManager {
         }
     }
 
+    // Optimized method for autocomplete - gets unique item names directly from database
+    async getUniqueInventoryNames(guildId, slot = null, searchPrefix = '') {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            
+            let query = {
+                guildId: guildId,
+                type: 'inventory_item'
+            };
+            
+            if (slot) {
+                query.slot = slot;
+            }
+            
+            // Use regex for case-insensitive search if prefix provided
+            if (searchPrefix) {
+                query.name = { $regex: `^${searchPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, $options: 'i' };
+            }
+            
+            // Use distinct to get unique names directly from database
+            const names = await collection.distinct('name', query);
+            return names || [];
+        } catch (error) {
+            console.error('❌ Failed to get unique inventory names:', error);
+            return [];
+        }
+    }
+
+    // Optimized method for autocomplete - gets unique tier equivalents directly from database
+    async getUniqueTierEquivalents(guildId, searchPrefix = '') {
+        try {
+            const collection = await this.getGuildCollection(guildId);
+            
+            let query = {
+                guildId: guildId,
+                type: 'inventory_item'
+            };
+            
+            // Use regex for case-insensitive search if prefix provided
+            if (searchPrefix) {
+                query.tierEquivalent = { $regex: `^${searchPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, $options: 'i' };
+            }
+            
+            // Use distinct to get unique tier equivalents directly from database
+            const tiers = await collection.distinct('tierEquivalent', query);
+            return tiers || [];
+        } catch (error) {
+            console.error('❌ Failed to get unique tier equivalents:', error);
+            return [];
+        }
+    }
+
     async removeGearFromInventory(guildId, gearName, slot, tierEquivalent, quantity = 1) {
         try {
             const collection = await this.getGuildCollection(guildId);
