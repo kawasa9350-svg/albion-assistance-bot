@@ -35,7 +35,9 @@ const config = {
     // Shared secret for accepting webhook payloads from the Alliance bot
     allianceWebhookSecret: process.env.ALLIANCE_WEBHOOK_SECRET || "",
     // Optional override for caller fee if the inbound payload omits it
-    defaultCallerFeeRate: parseFloat(process.env.CALLER_FEE_RATE || "0.05")
+    defaultCallerFeeRate: parseFloat(process.env.CALLER_FEE_RATE || "0.05"),
+    // Channel ID for alliance lootsplit confirmations (optional)
+    allianceNotificationChannelId: process.env.ALLIANCE_NOTIFICATION_CHANNEL_ID || ""
   },
   registration: {
     prefixRequiredRoles: ["1233618625034850377"],

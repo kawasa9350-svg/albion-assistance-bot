@@ -1,4 +1,4 @@
-const { Client, Collection, GatewayIntentBits, Events, InteractionType, ChannelType } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, Events, InteractionType, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -22,6 +22,10 @@ client.cooldowns = new Collection();
 
 // Initialize database manager
 const dbManager = new DatabaseManager();
+
+// Store pending alliance loot splits for confirmation/cancellation
+// Key: splitId (timestamp-based), Value: { guildId, userIds, amounts, splitData }
+client.pendingAllianceSplits = new Map();
 
 // Load commands
 const commandsPath = path.join(__dirname, 'commands');
@@ -67,6 +71,24 @@ client.once(Events.ClientReady, async () => {
     
     // Set bot status
     client.user.setActivity('𓆩𖤍𓆪 Phoenix Rebels 𓆩𖤍𓆪', { type: 'WATCHING' });
+    
+    // Cleanup old pending alliance splits (older than 24 hours)
+    setInterval(() => {
+        const now = new Date();
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        let cleaned = 0;
+        
+        for (const [splitId, split] of client.pendingAllianceSplits.entries()) {
+            if (now - split.createdAt > maxAge) {
+                client.pendingAllianceSplits.delete(splitId);
+                cleaned++;
+            }
+        }
+        
+        if (cleaned > 0 && isDev) {
+            console.log(`🧹 Cleaned up ${cleaned} expired pending alliance splits`);
+        }
+    }, 60 * 60 * 1000); // Run every hour
     
     if (isDev) {
         console.log('🔧 Testing event handler registration...');
@@ -613,6 +635,82 @@ client.handleButtonInteraction = async (interaction) => {
         } else {
             console.error('Regear command or handleButtonInteraction method not found');
         }
+    } else if (customId.startsWith('alliance_split_approve_') || customId.startsWith('alliance_split_cancel_')) {
+        console.log('Alliance split button detected');
+        
+        // Check if user has admin permissions
+        if (!interaction.member.permissions.has('Administrator')) {
+            await interaction.reply({ 
+                content: '❌ You need Administrator permissions to approve or cancel loot splits.', 
+                ephemeral: true 
+            });
+            return;
+        }
+
+        const splitId = customId.split('_').slice(3).join('_'); // Extract split ID
+        const pendingSplit = client.pendingAllianceSplits.get(splitId);
+
+        if (!pendingSplit) {
+            await interaction.reply({ 
+                content: '❌ This loot split has already been processed or expired.', 
+                ephemeral: true 
+            });
+            return;
+        }
+
+        if (customId.startsWith('alliance_split_approve_')) {
+            // Approve - just remove from pending and update message
+            client.pendingAllianceSplits.delete(splitId);
+            
+            const approvedEmbed = new EmbedBuilder()
+                .setColor('#00FF00')
+                .setTitle('✅ Loot Split Approved')
+                .setDescription(`This loot split has been approved and balances remain credited.`)
+                .setFooter({ text: `Split ID: ${splitId}` })
+                .setTimestamp();
+
+            await interaction.update({ embeds: [approvedEmbed], components: [] });
+            await interaction.followUp({ 
+                content: `✅ Loot split approved by ${interaction.user}. Balances remain credited.`, 
+                ephemeral: false 
+            });
+        } else if (customId.startsWith('alliance_split_cancel_')) {
+            // Cancel - reverse all balance changes
+            try {
+                for (const change of pendingSplit.balanceChanges) {
+                    await dbManager.updateUserBalance(
+                        pendingSplit.guildId, 
+                        change.userId, 
+                        change.amount, 
+                        'subtract'
+                    );
+                }
+
+                client.pendingAllianceSplits.delete(splitId);
+
+                const cancelledEmbed = new EmbedBuilder()
+                    .setColor('#FF0000')
+                    .setTitle('❌ Loot Split Cancelled')
+                    .setDescription(`This loot split has been cancelled and all balance changes have been reversed.`)
+                    .addFields(
+                        { name: 'Reversed Amounts', value: `${pendingSplit.balanceChanges.length} users had balances reversed`, inline: false }
+                    )
+                    .setFooter({ text: `Split ID: ${splitId}` })
+                    .setTimestamp();
+
+                await interaction.update({ embeds: [cancelledEmbed], components: [] });
+                await interaction.followUp({ 
+                    content: `❌ Loot split cancelled by ${interaction.user}. All balances have been reversed.`, 
+                    ephemeral: false 
+                });
+            } catch (error) {
+                console.error('Error reversing alliance split:', error);
+                await interaction.reply({ 
+                    content: '❌ An error occurred while reversing the loot split. Please check logs.', 
+                    ephemeral: true 
+                });
+            }
+        }
     }
 };
 
@@ -1100,13 +1198,38 @@ async function handleAllianceLootsplitWebhook(req, res) {
 
         const payoutPerPlayer = Math.floor(splitPool / phoenixCount);
 
-        // Credit balances (caller gets extra caller fee)
+        // Store balance changes for potential reversal
+        const balanceChanges = [];
         for (const userId of validUsers) {
             const amount = userId === callerId
                 ? payoutPerPlayer + (callerInPhoenix ? callerFee : 0)
                 : payoutPerPlayer;
+            balanceChanges.push({ userId, amount });
             await dbManager.updateUserBalance(guildId, userId, amount, 'add');
         }
+
+        // Create split ID for tracking
+        const splitId = `alliance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Store split data for potential cancellation
+        client.pendingAllianceSplits.set(splitId, {
+            guildId,
+            balanceChanges,
+            splitData: {
+                splitType: contentType,
+                totalLoot,
+                repairFees,
+                taxRate,
+                taxAmount,
+                callerFeeRate: callerCutRate,
+                callerFee,
+                payoutPerPlayer,
+                participants: validUsers,
+                callerId,
+                source: 'alliance-webhook'
+            },
+            createdAt: new Date()
+        });
 
         // Record the split for history
         await dbManager.createLootSplit(guildId, {
@@ -1120,8 +1243,52 @@ async function handleAllianceLootsplitWebhook(req, res) {
             payoutPerPlayer,
             participants: validUsers,
             callerId,
-            source: 'alliance-webhook'
+            source: 'alliance-webhook',
+            splitId // Store for reference
         });
+
+        // Send confirmation message to notification channel if configured
+        if (config.integrations.allianceNotificationChannelId && client.isReady()) {
+            try {
+                const channel = await client.channels.fetch(config.integrations.allianceNotificationChannelId);
+                if (channel && channel.isTextBased()) {
+                    const callerMention = callerId ? `<@${callerId}>` : 'Unknown';
+                    const participantsList = validUsers.map(id => `<@${id}>`).join(', ') || 'None';
+                    
+                    const confirmEmbed = new EmbedBuilder()
+                        .setColor('#FFAA00')
+                        .setTitle('💰 Alliance Loot Split Received')
+                        .setDescription(`A loot split from the Alliance bot has been processed and balances have been credited.`)
+                        .addFields(
+                            { name: '📊 Summary', value: `**Content Type:** ${contentType}\n**Total Loot:** ${totalLoot.toLocaleString()} silver\n**Repair Fees:** ${repairFees.toLocaleString()} silver\n**Tax Rate:** ${taxRate}%\n**Tax Amount:** ${taxAmount.toLocaleString()} silver\n**Caller Fee:** ${callerFee.toLocaleString()} silver`, inline: false },
+                            { name: '👥 Participants', value: `${validUsers.length} Phoenix Rebels members`, inline: true },
+                            { name: '💵 Per Player', value: `${payoutPerPlayer.toLocaleString()} silver`, inline: true },
+                            { name: '📢 Caller', value: callerMention, inline: true },
+                            { name: '🆔 Split ID', value: `\`${splitId}\``, inline: false }
+                        )
+                        .setFooter({ text: 'Click Cancel to reverse balances if this split was incorrect' })
+                        .setTimestamp();
+
+                    const row = new ActionRowBuilder()
+                        .addComponents(
+                            new ButtonBuilder()
+                                .setCustomId(`alliance_split_approve_${splitId}`)
+                                .setLabel('✅ Approve')
+                                .setStyle(ButtonStyle.Success)
+                                .setEmoji('✅'),
+                            new ButtonBuilder()
+                                .setCustomId(`alliance_split_cancel_${splitId}`)
+                                .setLabel('❌ Cancel & Reverse')
+                                .setStyle(ButtonStyle.Danger)
+                                .setEmoji('❌')
+                        );
+
+                    await channel.send({ embeds: [confirmEmbed], components: [row] });
+                }
+            } catch (error) {
+                console.error('Failed to send alliance split confirmation:', error);
+            }
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -1130,7 +1297,8 @@ async function handleAllianceLootsplitWebhook(req, res) {
             taxRate,
             taxAmount,
             callerFee,
-            payoutPerPlayer
+            payoutPerPlayer,
+            splitId
         }));
     } catch (err) {
         console.error('Error handling alliance lootsplit webhook:', err);

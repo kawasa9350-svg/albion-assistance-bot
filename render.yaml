@@ -24,3 +24,5 @@ services:
       - key: CALLER_FEE_RATE
         value: "0.05"
         sync: false
+      - key: ALLIANCE_NOTIFICATION_CHANNEL_ID
+        sync: false
