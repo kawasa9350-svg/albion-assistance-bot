@@ -31,6 +31,12 @@ const config = {
   features: {
     enableDMs: false
   },
+  integrations: {
+    // Shared secret for accepting webhook payloads from the Alliance bot
+    allianceWebhookSecret: process.env.ALLIANCE_WEBHOOK_SECRET || "",
+    // Optional override for caller fee if the inbound payload omits it
+    defaultCallerFeeRate: parseFloat(process.env.CALLER_FEE_RATE || "0.05")
+  },
   registration: {
     prefixRequiredRoles: ["1233618625034850377"],
     skipPrefixForRoles: [""]

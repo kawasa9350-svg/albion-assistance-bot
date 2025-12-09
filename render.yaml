@@ -19,3 +19,8 @@ services:
       - key: SKIP_DEPLOY
         value: false
         sync: false
+      - key: ALLIANCE_WEBHOOK_SECRET
+        sync: false
+      - key: CALLER_FEE_RATE
+        value: "0.05"
+        sync: false

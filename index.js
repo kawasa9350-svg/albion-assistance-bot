@@ -983,7 +983,152 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Create HTTP server for ping services and health checks
+// Helper: parse JSON body with a small size limit
+function parseJsonBody(req) {
+    return new Promise((resolve, reject) => {
+        let body = '';
+        const MAX_SIZE = 1 * 1024 * 1024; // 1MB safety cap
+
+        req.on('data', chunk => {
+            body += chunk;
+            if (body.length > MAX_SIZE) {
+                reject(new Error('Payload too large'));
+                req.destroy();
+            }
+        });
+
+        req.on('end', () => {
+            try {
+                const parsed = JSON.parse(body || '{}');
+                resolve(parsed);
+            } catch (err) {
+                reject(new Error('Invalid JSON'));
+            }
+        });
+
+        req.on('error', reject);
+    });
+}
+
+// Process alliance webhook payloads to credit balances with Phoenix tax + caller fee
+async function handleAllianceLootsplitWebhook(req, res) {
+    try {
+        const secret = req.headers['x-webhook-secret'];
+        if (!config.integrations.allianceWebhookSecret || secret !== config.integrations.allianceWebhookSecret) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Unauthorized' }));
+            return;
+        }
+
+        const payload = await parseJsonBody(req);
+        const {
+            guildId,
+            contentType,
+            totalLoot,
+            repairFees = 0,
+            callerFeeRate,
+            callerId,
+            participants
+        } = payload || {};
+
+        if (!guildId || !contentType || !totalLoot || !callerId || !Array.isArray(participants)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing required fields' }));
+            return;
+        }
+
+        // Ensure guild exists in Phoenix
+        const guildRegistered = await dbManager.isGuildRegistered(guildId);
+        if (!guildRegistered) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Guild not registered in Phoenix Assistance' }));
+            return;
+        }
+
+        // Validate users and filter to registered only
+        const registrationChecks = await Promise.all(
+            participants.map(async userId => ({
+                userId,
+                registered: await dbManager.isUserRegistered(guildId, userId)
+            }))
+        );
+        const validUsers = registrationChecks.filter(r => r.registered).map(r => r.userId);
+
+        if (!validUsers.includes(callerId)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Caller is not registered in Phoenix Assistance' }));
+            return;
+        }
+
+        if (validUsers.length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'No registered participants found' }));
+            return;
+        }
+
+        // Compute tax and caller fee using Phoenix rules
+        let taxRate = await dbManager.getTaxRate(guildId, contentType);
+        if (taxRate === null || taxRate === undefined) {
+            taxRate = 20; // default Phoenix tax
+        }
+        const callerCutRate = callerFeeRate !== undefined && callerFeeRate !== null
+            ? callerFeeRate
+            : config.integrations.defaultCallerFeeRate || 0.05;
+
+        const lootAfterRepairs = Math.max(0, totalLoot - repairFees);
+        const taxBase = lootAfterRepairs;
+        const taxAmount = Math.floor(taxBase * taxRate / 100);
+        const callerFee = Math.floor(lootAfterRepairs * callerCutRate);
+        const splitPool = lootAfterRepairs - taxAmount - callerFee;
+
+        if (splitPool < 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Split pool is negative after fees' }));
+            return;
+        }
+
+        const payoutPerPlayer = Math.floor(splitPool / validUsers.length);
+
+        // Credit balances (caller gets extra caller fee)
+        for (const userId of validUsers) {
+            const amount = userId === callerId
+                ? payoutPerPlayer + callerFee
+                : payoutPerPlayer;
+            await dbManager.updateUserBalance(guildId, userId, amount, 'add');
+        }
+
+        // Record the split for history
+        await dbManager.createLootSplit(guildId, {
+            splitType: contentType,
+            totalLoot,
+            repairFees,
+            taxRate,
+            taxAmount,
+            callerFeeRate: callerCutRate,
+            callerFee,
+            payoutPerPlayer,
+            participants: validUsers,
+            callerId,
+            source: 'alliance-webhook'
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            status: 'ok',
+            creditedUsers: validUsers.length,
+            taxRate,
+            taxAmount,
+            callerFee,
+            payoutPerPlayer
+        }));
+    } catch (err) {
+        console.error('Error handling alliance lootsplit webhook:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
+}
+
+// Create HTTP server for ping services, health checks, and ingestion webhook
 const server = http.createServer((req, res) => {
     // Health check endpoint to prevent Render spin-down
     if (req.url === '/health' || req.url === '/') {
@@ -994,6 +1139,8 @@ const server = http.createServer((req, res) => {
             uptime: process.uptime(),
             timestamp: new Date().toISOString()
         }));
+    } else if (req.url === '/ingest-lootsplit' && req.method === 'POST') {
+        handleAllianceLootsplitWebhook(req, res);
     } else {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('Bot is alive! 🟢');
