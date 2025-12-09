@@ -1045,7 +1045,8 @@ async function handleAllianceLootsplitWebhook(req, res) {
             return;
         }
 
-        // Validate users and filter to registered only
+        // Validate users and filter to registered only in THIS Phoenix guild
+        // Users registered in Phoenix but under a different guildId will be excluded
         const registrationChecks = await Promise.all(
             participants.map(async userId => ({
                 userId,
@@ -1054,11 +1055,8 @@ async function handleAllianceLootsplitWebhook(req, res) {
         );
         const validUsers = registrationChecks.filter(r => r.registered).map(r => r.userId);
 
-        if (!validUsers.includes(callerId)) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Caller is not registered in Phoenix Assistance' }));
-            return;
-        }
+        // Caller doesn't need to be in Phoenix - if they're not, they just won't get the caller fee
+        const callerInPhoenix = validUsers.includes(callerId);
 
         if (validUsers.length === 0) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1075,11 +1073,24 @@ async function handleAllianceLootsplitWebhook(req, res) {
             ? callerFeeRate
             : config.integrations.defaultCallerFeeRate || 0.05;
 
-        const lootAfterRepairs = Math.max(0, totalLoot - repairFees);
-        const taxBase = lootAfterRepairs;
-        const taxAmount = Math.floor(taxBase * taxRate / 100);
-        const callerFee = Math.floor(lootAfterRepairs * callerCutRate);
-        const splitPool = lootAfterRepairs - taxAmount - callerFee;
+        // Only allocate the portion belonging to Phoenix-registered participants
+        const totalParticipants = participants.length;
+        const phoenixCount = validUsers.length;
+        const ratio = totalParticipants > 0 ? Math.min(1, phoenixCount / totalParticipants) : 0;
+
+        // Base values
+        const lootAfterRepairsTotal = Math.max(0, totalLoot - repairFees);
+        const phoenixAfterRepairs = Math.floor(lootAfterRepairsTotal * ratio);
+
+        // Tax rule: tax is computed on totalLoot, then repair fees are deducted; apply full tax to the Phoenix pool
+        const rawTax = totalLoot * taxRate / 100;
+        const taxAmount = Math.max(0, Math.floor(rawTax - repairFees));
+
+        // Caller fee is on post-repair total and is NOT taxed; only paid if caller is Phoenix
+        const callerFee = Math.floor(lootAfterRepairsTotal * callerCutRate);
+
+        // Split pool for Phoenix members
+        const splitPool = Math.max(0, phoenixAfterRepairs - taxAmount - (callerInPhoenix ? callerFee : 0));
 
         if (splitPool < 0) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1087,12 +1098,12 @@ async function handleAllianceLootsplitWebhook(req, res) {
             return;
         }
 
-        const payoutPerPlayer = Math.floor(splitPool / validUsers.length);
+        const payoutPerPlayer = Math.floor(splitPool / phoenixCount);
 
         // Credit balances (caller gets extra caller fee)
         for (const userId of validUsers) {
             const amount = userId === callerId
-                ? payoutPerPlayer + callerFee
+                ? payoutPerPlayer + (callerInPhoenix ? callerFee : 0)
                 : payoutPerPlayer;
             await dbManager.updateUserBalance(guildId, userId, amount, 'add');
         }
