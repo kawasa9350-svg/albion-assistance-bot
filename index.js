@@ -638,10 +638,43 @@ client.handleButtonInteraction = async (interaction) => {
     } else if (customId.startsWith('alliance_split_approve_') || customId.startsWith('alliance_split_cancel_')) {
         console.log('Alliance split button detected');
         
-        // Check if user has admin permissions
-        if (!interaction.member.permissions.has('Administrator')) {
+        // Check if user has permission
+        const member = interaction.member;
+        let hasPermission = false;
+        
+        // Check if user is admin
+        if (member.permissions.has('Administrator')) {
+            hasPermission = true;
+        } else {
+            // Check if user has alliance-split-approve permission directly
+            try {
+                const userHasPermission = await dbManager.hasPermission(interaction.guildId, member.id, 'alliance-split-approve');
+                if (userHasPermission) {
+                    hasPermission = true;
+                }
+            } catch (error) {
+                console.error('Error checking user permission:', error);
+            }
+            
+            // Check if any of user's roles have alliance-split-approve permission
+            if (!hasPermission) {
+                for (const role of member.roles.cache.values()) {
+                    try {
+                        const roleHasPermission = await dbManager.hasPermission(interaction.guildId, role.id, 'alliance-split-approve');
+                        if (roleHasPermission) {
+                            hasPermission = true;
+                            break;
+                        }
+                    } catch (error) {
+                        console.error(`Error checking role ${role.id} permission:`, error);
+                    }
+                }
+            }
+        }
+
+        if (!hasPermission) {
             await interaction.reply({ 
-                content: '❌ You need Administrator permissions to approve or cancel loot splits.', 
+                content: '❌ You do not have permission to approve or cancel loot splits.\n\n**Required:** Administrator role or alliance-split-approve permission', 
                 ephemeral: true 
             });
             return;
@@ -662,11 +695,20 @@ client.handleButtonInteraction = async (interaction) => {
             // Approve - just remove from pending and update message
             client.pendingAllianceSplits.delete(splitId);
             
+            const embedData = pendingSplit.embedData;
             const approvedEmbed = new EmbedBuilder()
                 .setColor('#00FF00')
-                .setTitle('✅ Loot Split Approved')
+                .setTitle('✅ Alliance Loot Split Approved')
                 .setDescription(`This loot split has been approved and balances remain credited.`)
-                .setFooter({ text: `Split ID: ${splitId}` })
+                .addFields(
+                    { name: '📊 Summary', value: `**Content Type:** ${embedData.contentType}\n**Total Loot:** ${embedData.totalLoot.toLocaleString()} silver\n**Repair Fees:** ${embedData.repairFees.toLocaleString()} silver\n**Tax Rate:** ${embedData.taxRate}%\n**Caller Fee:** ${embedData.callerFee.toLocaleString()} silver`, inline: false },
+                    { name: '👥 Phoenix Rebels Participants', value: embedData.participantsList, inline: false },
+                    { name: '💵 Per Player', value: `${embedData.payoutPerPlayer.toLocaleString()} silver`, inline: true },
+                    { name: '📢 Caller', value: embedData.callerMention, inline: true },
+                    { name: '🆔 Split ID', value: `\`${splitId}\``, inline: false },
+                    { name: '✅ Status', value: `Approved by ${interaction.user}`, inline: false }
+                )
+                .setFooter({ text: 'Phoenix Assistance Bot' })
                 .setTimestamp();
 
             await interaction.update({ embeds: [approvedEmbed], components: [] });
@@ -688,20 +730,11 @@ client.handleButtonInteraction = async (interaction) => {
 
                 client.pendingAllianceSplits.delete(splitId);
 
-                const cancelledEmbed = new EmbedBuilder()
-                    .setColor('#FF0000')
-                    .setTitle('❌ Loot Split Cancelled')
-                    .setDescription(`This loot split has been cancelled and all balance changes have been reversed.`)
-                    .addFields(
-                        { name: 'Reversed Amounts', value: `${pendingSplit.balanceChanges.length} users had balances reversed`, inline: false }
-                    )
-                    .setFooter({ text: `Split ID: ${splitId}` })
-                    .setTimestamp();
-
-                await interaction.update({ embeds: [cancelledEmbed], components: [] });
-                await interaction.followUp({ 
-                    content: `❌ Loot split cancelled by ${interaction.user}. All balances have been reversed.`, 
-                    ephemeral: false 
+                // Remove buttons and show simple cancellation message
+                await interaction.update({ 
+                    content: `❌ Loot split cancelled by ${interaction.user}. All balances have been reversed. (${pendingSplit.balanceChanges.length} users affected)`, 
+                    embeds: [], 
+                    components: [] 
                 });
             } catch (error) {
                 console.error('Error reversing alliance split:', error);
@@ -1211,6 +1244,11 @@ async function handleAllianceLootsplitWebhook(req, res) {
         // Create split ID for tracking
         const splitId = `alliance_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+        // Prepare embed display data
+        const callerMention = callerId ? `<@${callerId}>` : 'Unknown';
+        const participantsList = validUsers.map(id => `<@${id}>`).join(', ') || 'None';
+        const displayParticipantsList = participantsList.length > 1024 ? `${participantsList.substring(0, 1020)}...` : participantsList;
+
         // Store split data for potential cancellation
         client.pendingAllianceSplits.set(splitId, {
             guildId,
@@ -1227,6 +1265,16 @@ async function handleAllianceLootsplitWebhook(req, res) {
                 participants: validUsers,
                 callerId,
                 source: 'alliance-webhook'
+            },
+            embedData: {
+                callerMention,
+                participantsList: displayParticipantsList,
+                contentType,
+                totalLoot,
+                repairFees,
+                taxRate,
+                callerFee,
+                payoutPerPlayer
             },
             createdAt: new Date()
         });
@@ -1252,16 +1300,13 @@ async function handleAllianceLootsplitWebhook(req, res) {
             try {
                 const channel = await client.channels.fetch(config.integrations.allianceNotificationChannelId);
                 if (channel && channel.isTextBased()) {
-                    const callerMention = callerId ? `<@${callerId}>` : 'Unknown';
-                    const participantsList = validUsers.map(id => `<@${id}>`).join(', ') || 'None';
-                    
                     const confirmEmbed = new EmbedBuilder()
                         .setColor('#FFAA00')
                         .setTitle('💰 Alliance Loot Split Received')
                         .setDescription(`A loot split from the Alliance bot has been processed and balances have been credited.`)
                         .addFields(
-                            { name: '📊 Summary', value: `**Content Type:** ${contentType}\n**Total Loot:** ${totalLoot.toLocaleString()} silver\n**Repair Fees:** ${repairFees.toLocaleString()} silver\n**Tax Rate:** ${taxRate}%\n**Tax Amount:** ${taxAmount.toLocaleString()} silver\n**Caller Fee:** ${callerFee.toLocaleString()} silver`, inline: false },
-                            { name: '👥 Participants', value: `${validUsers.length} Phoenix Rebels members`, inline: true },
+                            { name: '📊 Summary', value: `**Content Type:** ${contentType}\n**Total Loot:** ${totalLoot.toLocaleString()} silver\n**Repair Fees:** ${repairFees.toLocaleString()} silver\n**Tax Rate:** ${taxRate}%\n**Caller Fee:** ${callerFee.toLocaleString()} silver`, inline: false },
+                            { name: '👥 Phoenix Rebels Participants', value: displayParticipantsList, inline: false },
                             { name: '💵 Per Player', value: `${payoutPerPlayer.toLocaleString()} silver`, inline: true },
                             { name: '📢 Caller', value: callerMention, inline: true },
                             { name: '🆔 Split ID', value: `\`${splitId}\``, inline: false }

@@ -27,7 +27,8 @@ module.exports = {
                     { name: 'balance', value: 'balance' },
                     { name: 'attendance', value: 'attendance' },
                     { name: 'event', value: 'event' },
-                    { name: 'regear', value: 'regear' }
+                    { name: 'regear', value: 'regear' },
+                    { name: 'alliance-split-approve', value: 'alliance-split-approve' }
                 ))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
