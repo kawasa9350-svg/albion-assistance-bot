@@ -296,6 +296,8 @@ module.exports = {
             // Filter inventory by selected tier
             const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
 
+            const MAX_SELECT_OPTIONS = 25;
+
             // Helper function to create a dropdown for a slot
             const createSlotDropdown = (slot) => {
                 const slotItems = filteredInventory.filter(item => item.slot === slot);
@@ -321,6 +323,7 @@ module.exports = {
                     
                     const seenValues = new Set();
                     const currentSelection = currentSelections[slot];
+                    const options = [];
                     
                     sortedItems.forEach(item => {
                         const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
@@ -339,8 +342,27 @@ module.exports = {
                             option.setDefault(true);
                         }
                         
-                        selectMenu.addOptions([option]);
+                        options.push(option);
                     });
+
+                    // Discord hard-limit: max 25 options per select menu.
+                    // Keep the currently-selected option visible even if it falls outside the first 25.
+                    let finalOptions = options;
+                    if (options.length > MAX_SELECT_OPTIONS) {
+                        const selectedValue = currentSelection
+                            ? `${currentSelection.name}|${currentSelection.tierEquivalent}|${slot}`
+                            : null;
+                        const selectedOption = selectedValue ? options.find(o => o.data?.value === selectedValue) : null;
+
+                        finalOptions = options.slice(0, MAX_SELECT_OPTIONS);
+                        if (selectedOption && !finalOptions.some(o => o.data?.value === selectedValue)) {
+                            finalOptions = [selectedOption, ...finalOptions.slice(0, MAX_SELECT_OPTIONS - 1)];
+                        }
+
+                        selectMenu.setPlaceholder(`Select ${formatSlotName(slot)} (showing ${finalOptions.length}/${options.length})`);
+                    }
+
+                    selectMenu.addOptions(finalOptions);
                 }
                 
                 return selectMenu;
@@ -409,6 +431,8 @@ module.exports = {
             // Filter inventory by selected tier
             const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
 
+            const MAX_SELECT_OPTIONS = 25;
+
             // Helper function to create a dropdown for a slot
             const createSlotDropdown = (slot) => {
                 const slotItems = filteredInventory.filter(item => item.slot === slot);
@@ -434,6 +458,7 @@ module.exports = {
                     
                     const seenValues = new Set();
                     const currentSelection = currentSelections[slot];
+                    const options = [];
                     
                     sortedItems.forEach(item => {
                         const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
@@ -452,8 +477,27 @@ module.exports = {
                             option.setDefault(true);
                         }
                         
-                        selectMenu.addOptions([option]);
+                        options.push(option);
                     });
+
+                    // Discord hard-limit: max 25 options per select menu.
+                    // Keep the currently-selected option visible even if it falls outside the first 25.
+                    let finalOptions = options;
+                    if (options.length > MAX_SELECT_OPTIONS) {
+                        const selectedValue = currentSelection
+                            ? `${currentSelection.name}|${currentSelection.tierEquivalent}|${slot}`
+                            : null;
+                        const selectedOption = selectedValue ? options.find(o => o.data?.value === selectedValue) : null;
+
+                        finalOptions = options.slice(0, MAX_SELECT_OPTIONS);
+                        if (selectedOption && !finalOptions.some(o => o.data?.value === selectedValue)) {
+                            finalOptions = [selectedOption, ...finalOptions.slice(0, MAX_SELECT_OPTIONS - 1)];
+                        }
+
+                        selectMenu.setPlaceholder(`Select ${formatSlotName(slot)} (showing ${finalOptions.length}/${options.length})`);
+                    }
+
+                    selectMenu.addOptions(finalOptions);
                 }
                 
                 return selectMenu;
