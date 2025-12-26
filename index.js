@@ -1,7 +1,12 @@
-const { Client, Collection, GatewayIntentBits, Events, InteractionType, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, Collection, GatewayIntentBits, Events, InteractionType, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, Routes } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const dns = require('dns');
+
+// Fix DNS resolution on some hosting providers (prefer IPv4)
+dns.setDefaultResultOrder('ipv4first');
+
 const DatabaseManager = require('./database.js');
 
 // Load configuration
@@ -1513,6 +1518,22 @@ if (!config.database.uri || config.database.uri === '') {
 }
 
 console.log('🔑 BOT_TOKEN is configured');
+
+// Manual REST API Check
+console.log('🧪 Testing REST API connection to Discord...');
+client.rest.get(Routes.gatewayBot())
+    .then(data => {
+        console.log('✅ REST API Connection Successful!');
+        console.log(`   Gateway URL: ${data.url}`);
+        console.log(`   Recommended Shards: ${data.shards}`);
+        console.log(`   Session Start Limit: ${data.session_start_limit.remaining}/${data.session_start_limit.total}`);
+    })
+    .catch(err => {
+        console.error('❌ REST API Connection FAILED!');
+        console.error('   This means the bot cannot reach Discord API (DNS/Network issue).');
+        console.error(err);
+    });
+
 console.log('🔌 Attempting to login to Discord...');
 
 // Debug logging
