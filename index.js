@@ -7,12 +7,14 @@ const DatabaseManager = require('./database.js');
 // Load configuration
 const config = require('./config.js');
 
-// Create Discord client with only allowed intents
+// Create Discord client with required intents
+// IMPORTANT: These intents must also be enabled in Discord Developer Portal:
+// https://discord.com/developers/applications -> Your Bot -> Bot -> Privileged Gateway Intents
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.Guilds,              // Required for guild events
+        GatewayIntentBits.GuildMessages,        // Required for message events (MessageDelete)
+        GatewayIntentBits.GuildVoiceStates     // Required for voice channel features
     ]
 });
 
@@ -22,6 +24,14 @@ client.cooldowns = new Collection();
 
 // Initialize database manager
 const dbManager = new DatabaseManager();
+
+// Debug logging for connection issues
+client.on('debug', info => {
+    // Only log important connection info to reduce noise
+    if (info.includes('Heartbeat') || info.includes('Session') || info.includes('Gateway') || info.includes('Connection') || info.includes('Identify')) {
+        console.log(`🔍 [DEBUG] ${info}`);
+    }
+});
 
 // Store pending alliance loot splits for confirmation/cancellation
 // Key: splitId (timestamp-based), Value: { guildId, userIds, amounts, splitData }
@@ -1129,19 +1139,40 @@ process.on('uncaughtException', error => {
 // Discord client error handling
 client.on('error', error => {
     console.error('❌ Discord client error:', error);
+    if (error.message && error.message.includes('intents')) {
+        console.error('⚠️ INTENT ERROR: Make sure all required intents are enabled in Discord Developer Portal!');
+        console.error('   Go to: https://discord.com/developers/applications -> Your Bot -> Bot -> Privileged Gateway Intents');
+        console.error('   Required intents: GUILDS, GUILD_MESSAGES, GUILD_VOICE_STATES');
+    }
 });
 
 client.on('warn', warning => {
     console.warn('⚠️ Discord client warning:', warning);
+    if (warning && warning.includes('intent')) {
+        console.warn('⚠️ INTENT WARNING: Check your Discord Developer Portal intents configuration');
+    }
 });
 
 // Handle authentication errors
-client.on('disconnect', () => {
+client.on('disconnect', (event) => {
     console.error('❌ Bot disconnected from Discord');
+    if (event.code === 4014) {
+        console.error('⚠️ DISCONNECT CODE 4014: Missing required intents!');
+        console.error('   Enable all required intents in Discord Developer Portal');
+    }
 });
 
 client.on('reconnecting', () => {
     console.log('🔄 Bot reconnecting to Discord...');
+});
+
+// Handle shard errors (intent-related)
+client.on('shardError', error => {
+    console.error('❌ Shard error:', error);
+    if (error.message && error.message.includes('intents')) {
+        console.error('⚠️ SHARD ERROR: Intent configuration issue!');
+        console.error('   Check Discord Developer Portal -> Bot -> Privileged Gateway Intents');
+    }
 });
 
 // Graceful shutdown
@@ -1446,6 +1477,12 @@ if (process.env.NODE_ENV === 'production') {
 // Login to Discord
 console.log('🚀 Starting bot...');
 console.log('📝 Checking configuration...');
+console.log('🔐 Configured intents:');
+console.log('   - GUILDS (Guilds)');
+console.log('   - GUILD_MESSAGES (Guild Messages)');
+console.log('   - GUILD_VOICE_STATES (Guild Voice States)');
+console.log('⚠️  Make sure these are enabled in Discord Developer Portal!');
+console.log('   https://discord.com/developers/applications -> Your Bot -> Bot -> Privileged Gateway Intents');
 
 if (!config.bot.token || config.bot.token === '') {
     console.error('❌ BOT_TOKEN is missing or empty! Please set BOT_TOKEN in your environment variables.');
@@ -1462,12 +1499,35 @@ if (!config.database.uri || config.database.uri === '') {
 console.log('🔑 BOT_TOKEN is configured');
 console.log('🔌 Attempting to login to Discord...');
 
+// Add debug logging for client events
+client.on('debug', info => {
+    // Filter out heartbeat messages to keep logs clean
+    if (!info.includes('Heartbeat')) {
+        console.log(`[DEBUG] ${info}`);
+    }
+});
+
 client.login(config.bot.token).catch(error => {
     console.error('❌ Failed to login to Discord:', error.message);
     console.error('Error details:', error);
-    if (error.message.includes('token') || error.code === 50035) {
+    
+    // Check for specific error codes
+    if (error.code === 4014) {
+        console.error('⚠️ ERROR CODE 4014: Missing required intents!');
+        console.error('   The bot requires these intents to be enabled in Discord Developer Portal:');
+        console.error('   - GUILDS (Server Members Intent)');
+        console.error('   - GUILD_MESSAGES (Message Content Intent)');
+        console.error('   - GUILD_VOICE_STATES (Voice States Intent)');
+        console.error('   Go to: https://discord.com/developers/applications');
+        console.error('   -> Select your application -> Bot -> Privileged Gateway Intents');
+        console.error('   -> Enable all required intents');
+    } else if (error.message.includes('token') || error.code === 50035) {
         console.error('   This usually means your BOT_TOKEN is invalid or expired.');
         console.error('   Please check your environment variables and ensure BOT_TOKEN is set correctly.');
+    } else if (error.message.includes('intents') || error.message.includes('intent')) {
+        console.error('⚠️ INTENT ERROR: Required intents are not enabled!');
+        console.error('   Enable intents in Discord Developer Portal -> Bot -> Privileged Gateway Intents');
     }
+    
     process.exit(1);
 });
