@@ -25,14 +25,6 @@ client.cooldowns = new Collection();
 // Initialize database manager
 const dbManager = new DatabaseManager();
 
-// Debug logging for connection issues
-client.on('debug', info => {
-    // Only log important connection info to reduce noise
-    if (info.includes('Heartbeat') || info.includes('Session') || info.includes('Gateway') || info.includes('Connection') || info.includes('Identify')) {
-        console.log(`🔍 [DEBUG] ${info}`);
-    }
-});
-
 // Store pending alliance loot splits for confirmation/cancellation
 // Key: splitId (timestamp-based), Value: { guildId, userIds, amounts, splitData }
 client.pendingAllianceSplits = new Map();
@@ -1499,13 +1491,10 @@ if (!config.database.uri || config.database.uri === '') {
 console.log('🔑 BOT_TOKEN is configured');
 console.log('🔌 Attempting to login to Discord...');
 
-// Add debug logging for client events
-client.on('debug', info => {
-    // Filter out heartbeat messages to keep logs clean
-    if (!info.includes('Heartbeat')) {
-        console.log(`[DEBUG] ${info}`);
-    }
-});
+// Debug logging
+client.on('debug', info => console.log(`[DEBUG] ${info}`));
+client.on('warn', info => console.log(`[WARN] ${info}`));
+client.on('error', error => console.error(`[ERROR] ${error.message}`));
 
 client.login(config.bot.token).catch(error => {
     console.error('❌ Failed to login to Discord:', error.message);
