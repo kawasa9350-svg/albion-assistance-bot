@@ -1099,6 +1099,24 @@ process.on('uncaughtException', error => {
     process.exit(1);
 });
 
+// Discord client error handling
+client.on('error', error => {
+    console.error('❌ Discord client error:', error);
+});
+
+client.on('warn', warning => {
+    console.warn('⚠️ Discord client warning:', warning);
+});
+
+// Handle authentication errors
+client.on('disconnect', () => {
+    console.error('❌ Bot disconnected from Discord');
+});
+
+client.on('reconnecting', () => {
+    console.log('🔄 Bot reconnecting to Discord...');
+});
+
 // Graceful shutdown
 process.on('SIGINT', async () => {
     console.log('\n🛑 Shutting down bot...');
@@ -1390,4 +1408,17 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Login to Discord
-client.login(config.bot.token);
+if (!config.bot.token || config.bot.token === '') {
+    console.error('❌ BOT_TOKEN is missing or empty! Please set BOT_TOKEN in your .env file.');
+    console.error('   The bot cannot start without a valid Discord bot token.');
+    process.exit(1);
+}
+
+client.login(config.bot.token).catch(error => {
+    console.error('❌ Failed to login to Discord:', error.message);
+    if (error.message.includes('token')) {
+        console.error('   This usually means your BOT_TOKEN is invalid or expired.');
+        console.error('   Please check your .env file and ensure BOT_TOKEN is set correctly.');
+    }
+    process.exit(1);
+});
