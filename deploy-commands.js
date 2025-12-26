@@ -22,6 +22,17 @@ for (const file of commandFiles) {
     }
 }
 
+// Validate configuration
+if (!config.bot.token || config.bot.token === '') {
+    console.error('❌ BOT_TOKEN is missing! Cannot deploy commands.');
+    process.exit(1);
+}
+
+if (!config.bot.applicationId || config.bot.applicationId === '') {
+    console.error('❌ APPLICATION_ID is missing! Cannot deploy commands.');
+    process.exit(1);
+}
+
 // Create REST instance
 const rest = new REST({ version: '10' }).setToken(config.bot.token);
 
@@ -70,5 +81,6 @@ const rest = new REST({ version: '10' }).setToken(config.bot.token);
         
     } catch (error) {
         console.error('❌ Error deploying commands:', error);
+        process.exit(1);
     }
 })();
