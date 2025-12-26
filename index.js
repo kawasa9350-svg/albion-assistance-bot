@@ -1420,6 +1420,24 @@ async function handleAllianceLootsplitWebhook(req, res) {
     }
 }
 
+// Memory log buffer for debugging
+const logBuffer = [];
+function addToLog(type, message) {
+    const timestamp = new Date().toISOString().split('T')[1].slice(0, -1); // HH:MM:SS.mmm
+    const logLine = `[${timestamp}] [${type}] ${message}`;
+    logBuffer.push(logLine);
+    if (logBuffer.length > 100) logBuffer.shift(); // Keep last 100 lines
+    // Also log to stdout/stderr
+    if (type === 'ERROR') console.error(message);
+    else console.log(message);
+}
+
+// Override console methods to capture logs
+const originalLog = console.log;
+const originalError = console.error;
+console.log = (...args) => addToLog('INFO', args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+console.error = (...args) => addToLog('ERROR', args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' '));
+
 // Create HTTP server for ping services, health checks, and ingestion webhook
 const server = http.createServer((req, res) => {
     // Health check endpoint to prevent Render spin-down
@@ -1434,6 +1452,9 @@ const server = http.createServer((req, res) => {
             timestamp: new Date().toISOString(),
             commands: client.commands ? client.commands.size : 0
         }));
+    } else if (req.url === '/logs') {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(logBuffer.join('\n'));
     } else if (req.url === '/ingest-lootsplit' && req.method === 'POST') {
         handleAllianceLootsplitWebhook(req, res);
     } else {
