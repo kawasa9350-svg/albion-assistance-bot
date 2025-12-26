@@ -1519,27 +1519,45 @@ if (!config.database.uri || config.database.uri === '') {
 
 console.log('🔑 BOT_TOKEN is configured');
 
-// Manual REST API Check using standalone REST instance (proven to work in deploy-commands.js)
-const { REST } = require('discord.js');
-const rest = new REST({ version: '10' }).setToken(config.bot.token);
+// Native Fetch Test (Bypassing Discord.js)
+console.log('🧪 Testing connection with native Fetch...');
+const botToken = config.bot.token;
 
-console.log('🧪 Testing REST API connection to Discord (Standalone REST)...');
-rest.get(Routes.gatewayBot())
-    .then(data => {
-        console.log('✅ REST API Connection Successful!');
-        console.log(`   Gateway URL: ${data.url}`);
-        console.log(`   Recommended Shards: ${data.shards}`);
-        
-        // Now try to login
-        console.log('🔌 Attempting to login to Discord...');
-        client.login(config.bot.token).catch(error => {
-             console.error('❌ Failed to login to Discord:', error);
+async function testConnection() {
+    try {
+        console.log('   Sending GET request to https://discord.com/api/v10/gateway/bot ...');
+        const response = await fetch('https://discord.com/api/v10/gateway/bot', {
+            headers: {
+                'Authorization': `Bot ${botToken}`,
+                'User-Agent': 'DiscordBot (https://github.com/kawasa9350-svg/albion-assistance-bot, 1.0.0)'
+            }
         });
-    })
-    .catch(err => {
-        console.error('❌ REST API Connection FAILED!');
-        console.error('   Error Details:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
-    });
+
+        console.log(`   Response Status: ${response.status} ${response.statusText}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('✅ Native Fetch SUCCESS!');
+            console.log(`   Gateway URL: ${data.url}`);
+            
+            // If fetch works, try to login normally
+            console.log('🔌 Attempting to login to Discord...');
+            client.login(config.bot.token).catch(error => {
+                 console.error('❌ Failed to login to Discord:', error);
+            });
+        } else {
+            console.error('❌ Native Fetch FAILED!');
+            const text = await response.text();
+            console.error(`   Response: ${text}`);
+        }
+    } catch (error) {
+        console.error('❌ Native Fetch ERROR (Network Blocked?):');
+        console.error(`   ${error.name}: ${error.message}`);
+        if (error.cause) console.error(`   Cause: ${error.cause}`);
+    }
+}
+
+testConnection();
 
 // Debug logging
 client.on('debug', info => console.log(`[DEBUG] ${info}`));
