@@ -11,25 +11,41 @@ class DatabaseManager {
 
     async connect() {
         try {
+            if (!this.config.database.uri || this.config.database.uri === '') {
+                console.error('❌ MONGODB_URI is not configured');
+                return false;
+            }
+
+            console.log('🔌 Connecting to MongoDB...');
             // Optimize MongoDB connection with connection pooling
             this.client = new MongoClient(this.config.database.uri, {
                 maxPoolSize: 10,
                 minPoolSize: 2,
                 maxIdleTimeMS: 30000,
-                serverSelectionTimeoutMS: 5000,
+                serverSelectionTimeoutMS: 10000, // Increased timeout for Render
                 socketTimeoutMS: 45000,
+                connectTimeoutMS: 10000, // Added connection timeout
             });
+            
             await this.client.connect();
             this.db = this.client.db(this.config.database.databaseName);
+            
+            // Test the connection
+            await this.db.admin().ping();
+            console.log('✅ MongoDB connection test successful');
             
             // Create indexes for better query performance
             await this.createIndexes();
             
-            const isDev = process.env.NODE_ENV !== 'production';
-            if (isDev) console.log('✅ Connected to MongoDB successfully!');
+            console.log('✅ Connected to MongoDB successfully!');
             return true;
         } catch (error) {
-            console.error('❌ Failed to connect to MongoDB:', error);
+            console.error('❌ Failed to connect to MongoDB:', error.message);
+            if (error.message.includes('authentication')) {
+                console.error('   Check your MONGODB_URI credentials');
+            } else if (error.message.includes('timeout')) {
+                console.error('   Connection timeout - check your network or MongoDB server');
+            }
             return false;
         }
     }

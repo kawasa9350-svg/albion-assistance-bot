@@ -28,45 +28,65 @@ const dbManager = new DatabaseManager();
 client.pendingAllianceSplits = new Map();
 
 // Load commands
+console.log('📦 Loading commands...');
 const commandsPath = path.join(__dirname, 'commands');
-const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+let commandFiles;
+try {
+    commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+    console.log(`Found ${commandFiles.length} command files`);
+} catch (error) {
+    console.error('❌ Failed to read commands directory:', error);
+    process.exit(1);
+}
+
+let loadedCommands = 0;
+let failedCommands = 0;
 
 for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = require(filePath);
-    
+    try {
+        const filePath = path.join(commandsPath, file);
+        const command = require(filePath);
+        
         if ('data' in command && 'execute' in command) {
             // Pass the database manager to the command
             command.dbManager = dbManager;
             client.commands.set(command.data.name, command);
-            const isDev = process.env.NODE_ENV !== 'production';
-            if (isDev) console.log(`✅ Loaded command: ${command.data.name}`);
+            loadedCommands++;
+            console.log(`✅ Loaded command: ${command.data.name}`);
         } else {
-            console.log(`⚠️ Command at ${filePath} is missing required properties`);
+            console.log(`⚠️ Command at ${filePath} is missing required properties (data or execute)`);
+            failedCommands++;
         }
+    } catch (error) {
+        console.error(`❌ Failed to load command ${file}:`, error.message);
+        failedCommands++;
+    }
 }
+
+console.log(`📊 Command loading complete: ${loadedCommands} loaded, ${failedCommands} failed`);
 
 // Bot ready event
 client.once(Events.ClientReady, async () => {
     const isDev = process.env.NODE_ENV !== 'production';
-    if (isDev) console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
+    console.log(`🤖 Bot is ready! Logged in as ${client.user.tag}`);
     
     // Connect to database
+    console.log('📊 Attempting to connect to database...');
     const dbConnected = await dbManager.connect();
     if (dbConnected) {
-        if (isDev) console.log('📊 Database connection established');
+        console.log('✅ Database connection established');
         
         // Load data in background (non-blocking) to speed up startup
         // Don't await - let it load in the background
         loadAllEventSignupsForAllGuilds().catch(err => {
-            console.error('Error loading event signups:', err);
+            console.error('❌ Error loading event signups:', err);
         });
         
         loadAllVoiceChannelSetups().catch(err => {
-            console.error('Error loading voice channel setups:', err);
+            console.error('❌ Error loading voice channel setups:', err);
         });
     } else {
-        console.error('❌ Failed to connect to database');
+        console.error('❌ Failed to connect to database - bot will continue but database features may not work');
     }
     
     // Set bot status
@@ -85,15 +105,14 @@ client.once(Events.ClientReady, async () => {
             }
         }
         
-        if (cleaned > 0 && isDev) {
+        if (cleaned > 0) {
             console.log(`🧹 Cleaned up ${cleaned} expired pending alliance splits`);
         }
     }, 60 * 60 * 1000); // Run every hour
     
-    if (isDev) {
-        console.log('🔧 Testing event handler registration...');
-        console.log(`MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
-    }
+    console.log('✅ Bot initialization complete');
+    console.log(`📊 Loaded ${client.commands.size} commands`);
+    console.log(`🔧 MessageDelete event handlers: ${client.listenerCount(Events.MessageDelete)}`);
 });
 
 // Helper function to load all event signups for all guilds
@@ -1090,12 +1109,20 @@ client.on(Events.GuildDelete, guild => {
 });
 
 // Error handling
-process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
+process.on('unhandledRejection', (error, promise) => {
+    console.error('❌ Unhandled promise rejection:', error);
+    console.error('Stack trace:', error.stack);
+    // Don't exit in production to allow the bot to recover, but log the error
+    if (process.env.NODE_ENV === 'production') {
+        console.error('⚠️ Continuing despite unhandled rejection (production mode)');
+    } else {
+        process.exit(1);
+    }
 });
 
 process.on('uncaughtException', error => {
-    console.error('Uncaught exception:', error);
+    console.error('❌ Uncaught exception:', error);
+    console.error('Stack trace:', error.stack);
     process.exit(1);
 });
 
@@ -1374,12 +1401,14 @@ async function handleAllianceLootsplitWebhook(req, res) {
 const server = http.createServer((req, res) => {
     // Health check endpoint to prevent Render spin-down
     if (req.url === '/health' || req.url === '/') {
+        const botStatus = client.user ? 'online' : 'offline';
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
             status: 'ok', 
-            bot: client.user ? 'online' : 'offline',
+            bot: botStatus,
             uptime: process.uptime(),
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            commands: client.commands ? client.commands.size : 0
         }));
     } else if (req.url === '/ingest-lootsplit' && req.method === 'POST') {
         handleAllianceLootsplitWebhook(req, res);
@@ -1392,8 +1421,15 @@ const server = http.createServer((req, res) => {
 // Start HTTP server on port 8080 (Render will use this)
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-    const isDev = process.env.NODE_ENV !== 'production';
-    if (isDev) console.log(`🌐 HTTP server running on port ${PORT}`);
+    console.log(`🌐 HTTP server running on port ${PORT}`);
+    console.log(`   Health check: http://localhost:${PORT}/health`);
+});
+
+server.on('error', (error) => {
+    console.error('❌ HTTP server error:', error);
+    if (error.code === 'EADDRINUSE') {
+        console.error(`   Port ${PORT} is already in use`);
+    }
 });
 
 // Keep-alive ping every 5 minutes to prevent Render spin-down (free tier)
@@ -1408,17 +1444,30 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Login to Discord
+console.log('🚀 Starting bot...');
+console.log('📝 Checking configuration...');
+
 if (!config.bot.token || config.bot.token === '') {
-    console.error('❌ BOT_TOKEN is missing or empty! Please set BOT_TOKEN in your .env file.');
+    console.error('❌ BOT_TOKEN is missing or empty! Please set BOT_TOKEN in your environment variables.');
     console.error('   The bot cannot start without a valid Discord bot token.');
     process.exit(1);
 }
 
+if (!config.database.uri || config.database.uri === '') {
+    console.warn('⚠️ MONGODB_URI is missing or empty! Database features will not work.');
+} else {
+    console.log('✅ MONGODB_URI is configured');
+}
+
+console.log('🔑 BOT_TOKEN is configured');
+console.log('🔌 Attempting to login to Discord...');
+
 client.login(config.bot.token).catch(error => {
     console.error('❌ Failed to login to Discord:', error.message);
-    if (error.message.includes('token')) {
+    console.error('Error details:', error);
+    if (error.message.includes('token') || error.code === 50035) {
         console.error('   This usually means your BOT_TOKEN is invalid or expired.');
-        console.error('   Please check your .env file and ensure BOT_TOKEN is set correctly.');
+        console.error('   Please check your environment variables and ensure BOT_TOKEN is set correctly.');
     }
     process.exit(1);
 });
