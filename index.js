@@ -1468,6 +1468,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // Login to Discord
 console.log('🚀 Starting bot...');
+console.log(`Node.js version: ${process.version}`);
 console.log('📝 Checking configuration...');
 console.log('🔐 Configured intents:');
 console.log('   - GUILDS (Guilds)');
