@@ -1427,9 +1427,10 @@ function addToLog(type, message) {
     const logLine = `[${timestamp}] [${type}] ${message}`;
     logBuffer.push(logLine);
     if (logBuffer.length > 100) logBuffer.shift(); // Keep last 100 lines
-    // Also log to stdout/stderr
-    if (type === 'ERROR') console.error(message);
-    else console.log(message);
+    
+    // Also log to original stdout/stderr to avoid recursion
+    if (type === 'ERROR') originalError.call(console, message);
+    else originalLog.call(console, message);
 }
 
 // Override console methods to capture logs
