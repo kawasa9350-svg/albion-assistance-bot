@@ -1519,49 +1519,32 @@ if (!config.database.uri || config.database.uri === '') {
 
 console.log('🔑 BOT_TOKEN is configured');
 
-// Manual REST API Check
-console.log('🧪 Testing REST API connection to Discord...');
-client.rest.get(Routes.gatewayBot())
+// Manual REST API Check using standalone REST instance (proven to work in deploy-commands.js)
+const { REST } = require('discord.js');
+const rest = new REST({ version: '10' }).setToken(config.bot.token);
+
+console.log('🧪 Testing REST API connection to Discord (Standalone REST)...');
+rest.get(Routes.gatewayBot())
     .then(data => {
         console.log('✅ REST API Connection Successful!');
         console.log(`   Gateway URL: ${data.url}`);
         console.log(`   Recommended Shards: ${data.shards}`);
-        console.log(`   Session Start Limit: ${data.session_start_limit.remaining}/${data.session_start_limit.total}`);
+        
+        // Now try to login
+        console.log('🔌 Attempting to login to Discord...');
+        client.login(config.bot.token).catch(error => {
+             console.error('❌ Failed to login to Discord:', error);
+        });
     })
     .catch(err => {
         console.error('❌ REST API Connection FAILED!');
-        console.error('   This means the bot cannot reach Discord API (DNS/Network issue).');
-        console.error(err);
+        console.error('   Error Details:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
     });
-
-console.log('🔌 Attempting to login to Discord...');
 
 // Debug logging
 client.on('debug', info => console.log(`[DEBUG] ${info}`));
 client.on('warn', info => console.log(`[WARN] ${info}`));
 client.on('error', error => console.error(`[ERROR] ${error.message}`));
 
-client.login(config.bot.token).catch(error => {
-    console.error('❌ Failed to login to Discord:', error.message);
-    console.error('Error details:', error);
-    
-    // Check for specific error codes
-    if (error.code === 4014) {
-        console.error('⚠️ ERROR CODE 4014: Missing required intents!');
-        console.error('   The bot requires these intents to be enabled in Discord Developer Portal:');
-        console.error('   - GUILDS (Server Members Intent)');
-        console.error('   - GUILD_MESSAGES (Message Content Intent)');
-        console.error('   - GUILD_VOICE_STATES (Voice States Intent)');
-        console.error('   Go to: https://discord.com/developers/applications');
-        console.error('   -> Select your application -> Bot -> Privileged Gateway Intents');
-        console.error('   -> Enable all required intents');
-    } else if (error.message.includes('token') || error.code === 50035) {
-        console.error('   This usually means your BOT_TOKEN is invalid or expired.');
-        console.error('   Please check your environment variables and ensure BOT_TOKEN is set correctly.');
-    } else if (error.message.includes('intents') || error.message.includes('intent')) {
-        console.error('⚠️ INTENT ERROR: Required intents are not enabled!');
-        console.error('   Enable intents in Discord Developer Portal -> Bot -> Privileged Gateway Intents');
-    }
-    
-    process.exit(1);
-});
+// Remove duplicate login call at the end of the file
+// client.login(config.bot.token).catch(...) is now handled in the REST success callback
