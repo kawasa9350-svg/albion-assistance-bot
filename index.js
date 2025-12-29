@@ -727,7 +727,7 @@ client.handleButtonInteraction = async (interaction) => {
                 .setTitle('✅ Alliance Loot Split Approved')
                 .setDescription(`This loot split has been approved and balances remain credited.`)
                 .addFields(
-                    { name: '📊 Summary', value: `**Content Type:** ${embedData.contentType}\n**Total Loot:** ${embedData.totalLoot.toLocaleString()} silver\n**Repair Fees:** ${embedData.repairFees.toLocaleString()} silver\n**Tax Rate:** ${embedData.taxRate}%\n**Caller Fee:** ${embedData.callerFee.toLocaleString()} silver`, inline: false },
+                    { name: '📊 Summary', value: `**Content Type:** ${embedData.contentType}\n**Gross Loot:** ${embedData.totalLoot.toLocaleString()} silver\n**Repair Fees:** ${embedData.repairFees.toLocaleString()} silver\n**Net Loot:** ${(embedData.totalLoot - embedData.repairFees).toLocaleString()} silver\n**Tax Rate:** ${embedData.taxRate}%\n**Caller Fee:** ${embedData.callerFee.toLocaleString()} silver`, inline: false },
                     { name: '👥 Phoenix Rebels Participants', value: embedData.participantsList, inline: false },
                     { name: '💵 Per Player', value: `${embedData.payoutPerPlayer.toLocaleString()} silver`, inline: true },
                     { name: '📢 Caller', value: embedData.callerMention, inline: true },
@@ -1232,7 +1232,9 @@ async function handleAllianceLootsplitWebhook(req, res) {
             repairFees = 0,
             callerFeeRate,
             callerId,
-            participants
+            participants,
+            explicitCallerFee,
+            callerFeeShare
         } = payload || {};
 
         if (!guildId || !contentType || !totalLoot || !callerId || !Array.isArray(participants)) {
@@ -1273,29 +1275,92 @@ async function handleAllianceLootsplitWebhook(req, res) {
         if (taxRate === null || taxRate === undefined) {
             taxRate = 20; // default Phoenix tax
         }
-        const callerCutRate = callerFeeRate !== undefined && callerFeeRate !== null
-            ? callerFeeRate
-            : config.integrations.defaultCallerFeeRate || 0.05;
+        
+        // Caller fee handling
+        let callerFee = 0;
+        let deductCallerFeeFromPool = true;
+        let effectiveCallerFeeRate = 0;
+        // Amount to deduct from tax base (only the share embedded in totalLoot)
+        let callerFeeTaxDeduction = 0; 
+
+        if (explicitCallerFee !== undefined && explicitCallerFee !== null) {
+            // Use provided fee (e.g. from Alliance Bot)
+            callerFee = explicitCallerFee;
+            deductCallerFeeFromPool = false; // Don't deduct from split pool (handled separately)
+            effectiveCallerFeeRate = callerFeeRate || 0;
+            // If callerFeeShare is provided, use it. Otherwise assume proportional if ratio known?
+            // But here we rely on callerFeeShare from payload.
+            callerFeeTaxDeduction = callerFeeShare !== undefined ? callerFeeShare : 0;
+        } else {
+            // Calculate locally
+            const callerCutRate = callerFeeRate !== undefined && callerFeeRate !== null
+                ? callerFeeRate
+                : config.integrations.defaultCallerFeeRate || 0.05;
+            effectiveCallerFeeRate = callerCutRate;
+            
+            // We'll calculate the amount after we determine the base
+            deductCallerFeeFromPool = true;
+        }
 
         // Only allocate the portion belonging to Phoenix-registered participants
         const totalParticipants = participants.length;
         const phoenixCount = validUsers.length;
+        // ratio is usually 1 if we only receive Phoenix participants
         const ratio = totalParticipants > 0 ? Math.min(1, phoenixCount / totalParticipants) : 0;
 
         // Base values
-        const lootAfterRepairsTotal = Math.max(0, totalLoot - repairFees);
-        const phoenixAfterRepairs = Math.floor(lootAfterRepairsTotal * ratio);
+        // totalLoot is the Gross Phoenix Share.
+        // Taxable Base = TotalLoot - CallerFeeShare (because caller fee is tax exempt)
+        
+        let taxableBase = totalLoot;
+        if (deductCallerFeeFromPool) {
+            // Local calculation: We deduct caller fee from the total later, 
+            // but for tax base, we need to know if caller fee is taxed.
+            // User says "caller is fee is not taxed".
+            // So we should estimate caller fee to deduct from tax base?
+            // Or is it "Tax First, then Caller Fee"?
+            // Usually: Total -> Tax -> Caller -> Split.
+            // If Caller Fee is NOT taxed, then Taxable = Total - CallerFee.
+            const estimatedCallerFee = Math.floor(totalLoot * effectiveCallerFeeRate);
+             // If local, we assume totalLoot includes the full caller fee?
+             // If this is a local split, totalLoot is the stack.
+             taxableBase = Math.max(0, totalLoot - estimatedCallerFee);
+             callerFeeTaxDeduction = estimatedCallerFee;
+             callerFee = estimatedCallerFee; // Set callerFee for display/payout
+        } else {
+            // Explicit mode
+            taxableBase = Math.max(0, totalLoot - callerFeeTaxDeduction);
+        }
 
-        // Tax rule: tax is computed on totalLoot, then repair fees are deducted; apply full tax to the Phoenix pool
-        const rawTax = totalLoot * taxRate / 100;
-        const taxAmount = Math.max(0, Math.floor(rawTax - repairFees));
+        // Tax Calculation (User Specific Logic)
+        // 1. "caller fee is subtracted and added into caller's paycheck"
+        //    Taxable Base = TotalLoot - CallerFee (if caller is Phoenix, otherwise TotalLoot is just split share?)
+        //    Actually, if caller is NOT Phoenix, the totalLoot sent didn't include the fee (per Alliance logic).
+        //    If caller IS Phoenix, totalLoot INCLUDES the fee.
+        //    So: Taxable Base = TotalLoot - (callerInPhoenix ? callerFee : 0)
+        
+        // Remove duplicate declaration - taxableBase was declared above at line 1313
+        if (callerInPhoenix && explicitCallerFee) {
+             taxableBase -= explicitCallerFee;
+        }
 
-        // Caller fee is on post-repair total and is NOT taxed; only paid if caller is Phoenix
-        const callerFee = Math.floor(lootAfterRepairsTotal * callerCutRate);
+        // 2. "remaining is taxed (if 40% then 5 million repair bill is subtracted from that 40%)"
+        //    Gross Tax = TaxableBase * Rate
+        //    Net Tax = Gross Tax - RepairFees
+        
+        const grossTax = Math.floor(taxableBase * taxRate / 100);
+        const taxAmount = grossTax - repairFees; // Allow negative values
 
-        // Split pool for Phoenix members
-        const splitPool = Math.max(0, phoenixAfterRepairs - taxAmount - (callerInPhoenix ? callerFee : 0));
-
+        // 3. "remaining % is subtracted from the remaining lootsplit after caller paycheck"
+        //    Split Pool = TaxableBase - TaxAmount.
+        //    If TaxAmount is negative (Repairs > GrossTax), we ADD to the pool (Refund).
+        
+        const splitPool = taxableBase - taxAmount;
+        
+        // Caller Payout Logic
+        // If caller is Phoenix, they get explicitCallerFee added to their specific balance.
+        // The splitPool is divided among ALL members (including caller).
+        
         if (splitPool < 0) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Split pool is negative after fees' }));
@@ -1332,7 +1397,7 @@ async function handleAllianceLootsplitWebhook(req, res) {
                 repairFees,
                 taxRate,
                 taxAmount,
-                callerFeeRate: callerCutRate,
+                callerFeeRate: effectiveCallerFeeRate,
                 callerFee,
                 payoutPerPlayer,
                 participants: validUsers,
@@ -1359,7 +1424,7 @@ async function handleAllianceLootsplitWebhook(req, res) {
             repairFees,
             taxRate,
             taxAmount,
-            callerFeeRate: callerCutRate,
+            callerFeeRate: effectiveCallerFeeRate,
             callerFee,
             payoutPerPlayer,
             participants: validUsers,
@@ -1378,7 +1443,7 @@ async function handleAllianceLootsplitWebhook(req, res) {
                         .setTitle('💰 Alliance Loot Split Received')
                         .setDescription(`A loot split from the Alliance bot has been processed and balances have been credited.`)
                         .addFields(
-                            { name: '📊 Summary', value: `**Content Type:** ${contentType}\n**Total Loot:** ${totalLoot.toLocaleString()} silver\n**Repair Fees:** ${repairFees.toLocaleString()} silver\n**Tax Rate:** ${taxRate}%\n**Caller Fee:** ${callerFee.toLocaleString()} silver`, inline: false },
+                            { name: '📊 Summary', value: `**Content Type:** ${contentType}\n**Gross Loot:** ${totalLoot.toLocaleString()} silver\n**Repair Fees:** ${repairFees.toLocaleString()} silver\n**Net Loot:** ${(totalLoot - repairFees).toLocaleString()} silver\n**Tax Rate:** ${taxRate}%\n**Caller Fee:** ${callerFee.toLocaleString()} silver`, inline: false },
                             { name: '👥 Phoenix Rebels Participants', value: displayParticipantsList, inline: false },
                             { name: '💵 Per Player', value: `${payoutPerPlayer.toLocaleString()} silver`, inline: true },
                             { name: '📢 Caller', value: callerMention, inline: true },
@@ -1419,7 +1484,7 @@ async function handleAllianceLootsplitWebhook(req, res) {
             splitId
         }));
     } catch (err) {
-        console.error('Error handling alliance lootsplit webhook:', err);
+        console.error('Error handling alliance lootsplit webhook:', err.stack || err);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Internal server error' }));
     }
@@ -1519,48 +1584,14 @@ if (!config.database.uri || config.database.uri === '') {
 
 console.log('🔑 BOT_TOKEN is configured');
 
-// Native Fetch Test (Bypassing Discord.js)
-console.log('🧪 Testing connection with native Fetch...');
-const botToken = config.bot.token;
-
-async function testConnection() {
-    try {
-        console.log('   Sending GET request to https://discord.com/api/v10/gateway/bot ...');
-        const response = await fetch('https://discord.com/api/v10/gateway/bot', {
-            headers: {
-                'Authorization': `Bot ${botToken}`,
-                'User-Agent': 'DiscordBot (https://github.com/kawasa9350-svg/albion-assistance-bot, 1.0.0)'
-            }
-        });
-
-        console.log(`   Response Status: ${response.status} ${response.statusText}`);
-        
-        if (response.ok) {
-            const data = await response.json();
-            console.log('✅ Native Fetch SUCCESS!');
-            console.log(`   Gateway URL: ${data.url}`);
-            
-            // If fetch works, try to login normally
-            console.log('🔌 Attempting to login to Discord...');
-            client.login(config.bot.token).catch(error => {
-                 console.error('❌ Failed to login to Discord:', error);
-            });
-        } else {
-            console.error('❌ Native Fetch FAILED!');
-            const text = await response.text();
-            console.error(`   Response: ${text}`);
-        }
-    } catch (error) {
-        console.error('❌ Native Fetch ERROR (Network Blocked?):');
-        console.error(`   ${error.name}: ${error.message}`);
-        if (error.cause) console.error(`   Cause: ${error.cause}`);
-    }
-}
-
-testConnection();
+// Login to Discord
+console.log('🔌 Attempting to login to Discord...');
+client.login(config.bot.token).catch(error => {
+     console.error('❌ Failed to login to Discord:', error);
+});
 
 // Debug logging
-client.on('debug', info => console.log(`[DEBUG] ${info}`));
+// client.on('debug', info => console.log(`[DEBUG] ${info}`));
 client.on('warn', info => console.log(`[WARN] ${info}`));
 client.on('error', error => console.error(`[ERROR] ${error.message}`));
 

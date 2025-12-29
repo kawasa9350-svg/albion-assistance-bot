@@ -91,6 +91,30 @@ function parseSelectionsFromEmbed(embed) {
     return selections;
 }
 
+// Helper function to extract current pages from component custom IDs
+function getSlotPagesFromComponents(components) {
+    const slotPages = {};
+    if (!components) return slotPages;
+    
+    components.forEach(row => {
+        row.components.forEach(component => {
+            if (component.customId && component.customId.startsWith('regear_')) {
+                // customId: regear_slot_page
+                const parts = component.customId.split('_');
+                // parts: ['regear', 'slot', 'page']
+                if (parts.length >= 3) {
+                    const slot = parts[1];
+                    const page = parseInt(parts[2], 10);
+                    if (!isNaN(page)) {
+                        slotPages[slot] = page;
+                    }
+                }
+            }
+        });
+    });
+    return slotPages;
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('regear')
@@ -296,18 +320,20 @@ module.exports = {
             // Filter inventory by selected tier
             const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
 
-            const MAX_SELECT_OPTIONS = 25;
+            const PAGE_SIZE = 23;
 
             // Helper function to create a dropdown for a slot
             const createSlotDropdown = (slot) => {
                 const slotItems = filteredInventory.filter(item => item.slot === slot);
                 const sortedItems = sortItemsByTierAndName([...slotItems]);
                 
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`regear_${slot}`);
+                const page = currentSelections.slotPages ? (currentSelections.slotPages[slot] || 0) : 0;
+
+                const selectMenu = new StringSelectMenuBuilder();
                 
                 if (sortedItems.length === 0) {
                     selectMenu
+                        .setCustomId(`regear_${slot}_0`)
                         .setPlaceholder(`${formatSlotName(slot)} - No items available`)
                         .setDisabled(true)
                         .addOptions([
@@ -316,16 +342,36 @@ module.exports = {
                                 .setValue('none')
                         ]);
                 } else {
+                    const totalItems = sortedItems.length;
+                    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+                    
+                    // Adjust page if out of bounds
+                    let effectivePage = page;
+                    if (effectivePage < 0) effectivePage = 0;
+                    if (effectivePage >= totalPages && totalPages > 0) effectivePage = totalPages - 1;
+                    
                     selectMenu
-                        .setPlaceholder(`Select ${formatSlotName(slot)}`)
+                        .setCustomId(`regear_${slot}_${effectivePage}`)
                         .setMinValues(0)
                         .setMaxValues(1);
+                    
+                    const start = effectivePage * PAGE_SIZE;
+                    const end = start + PAGE_SIZE;
+                    const pageItems = sortedItems.slice(start, end);
                     
                     const seenValues = new Set();
                     const currentSelection = currentSelections[slot];
                     const options = [];
                     
-                    sortedItems.forEach(item => {
+                    // Add Previous Page option
+                    if (effectivePage > 0) {
+                        options.push(new StringSelectMenuOptionBuilder()
+                            .setLabel('⬅️ Previous Page')
+                            .setValue('page_prev')
+                            .setDescription(`Go to page ${effectivePage}`));
+                    }
+                    
+                    pageItems.forEach(item => {
                         const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
                         if (seenValues.has(value)) return;
                         seenValues.add(value);
@@ -345,24 +391,29 @@ module.exports = {
                         options.push(option);
                     });
 
-                    // Discord hard-limit: max 25 options per select menu.
-                    // Keep the currently-selected option visible even if it falls outside the first 25.
-                    let finalOptions = options;
-                    if (options.length > MAX_SELECT_OPTIONS) {
-                        const selectedValue = currentSelection
-                            ? `${currentSelection.name}|${currentSelection.tierEquivalent}|${slot}`
-                            : null;
-                        const selectedOption = selectedValue ? options.find(o => o.data?.value === selectedValue) : null;
-
-                        finalOptions = options.slice(0, MAX_SELECT_OPTIONS);
-                        if (selectedOption && !finalOptions.some(o => o.data?.value === selectedValue)) {
-                            finalOptions = [selectedOption, ...finalOptions.slice(0, MAX_SELECT_OPTIONS - 1)];
-                        }
-
-                        selectMenu.setPlaceholder(`Select ${formatSlotName(slot)} (showing ${finalOptions.length}/${options.length})`);
+                    // Add Next Page option
+                    if (effectivePage < totalPages - 1) {
+                        options.push(new StringSelectMenuOptionBuilder()
+                            .setLabel('➡️ Next Page')
+                            .setValue('page_next')
+                            .setDescription(`Go to page ${effectivePage + 2}`));
                     }
 
-                    selectMenu.addOptions(finalOptions);
+                    // Set placeholder
+                    if (currentSelection) {
+                         const selectedValue = `${currentSelection.name}|${currentSelection.tierEquivalent}|${slot}`;
+                         const isSelectedInPage = pageItems.some(item => `${item.name}|${item.tierEquivalent}|${item.slot}` === selectedValue);
+                         
+                         if (isSelectedInPage) {
+                             selectMenu.setPlaceholder(`Select ${formatSlotName(slot)}`);
+                         } else {
+                             selectMenu.setPlaceholder(`${formatSlotName(slot)} (Selected: ${currentSelection.name})`);
+                         }
+                    } else {
+                        selectMenu.setPlaceholder(`Select ${formatSlotName(slot)} (Page ${effectivePage + 1}/${totalPages})`);
+                    }
+
+                    selectMenu.addOptions(options);
                 }
                 
                 return selectMenu;
@@ -431,18 +482,20 @@ module.exports = {
             // Filter inventory by selected tier
             const filteredInventory = inventory.filter(item => item.tierEquivalent === selectedTier);
 
-            const MAX_SELECT_OPTIONS = 25;
+            const PAGE_SIZE = 23;
 
             // Helper function to create a dropdown for a slot
             const createSlotDropdown = (slot) => {
                 const slotItems = filteredInventory.filter(item => item.slot === slot);
                 const sortedItems = sortItemsByTierAndName([...slotItems]);
                 
-                const selectMenu = new StringSelectMenuBuilder()
-                    .setCustomId(`regear_${slot}`);
+                const page = currentSelections.slotPages ? (currentSelections.slotPages[slot] || 0) : 0;
+                
+                const selectMenu = new StringSelectMenuBuilder();
                 
                 if (sortedItems.length === 0) {
                     selectMenu
+                        .setCustomId(`regear_${slot}_0`)
                         .setPlaceholder(`${formatSlotName(slot)} - No items available`)
                         .setDisabled(true)
                         .addOptions([
@@ -451,16 +504,36 @@ module.exports = {
                                 .setValue('none')
                         ]);
                 } else {
+                    const totalItems = sortedItems.length;
+                    const totalPages = Math.ceil(totalItems / PAGE_SIZE);
+                    
+                    // Adjust page if out of bounds
+                    let effectivePage = page;
+                    if (effectivePage < 0) effectivePage = 0;
+                    if (effectivePage >= totalPages && totalPages > 0) effectivePage = totalPages - 1;
+
                     selectMenu
-                        .setPlaceholder(`Select ${formatSlotName(slot)}`)
+                        .setCustomId(`regear_${slot}_${effectivePage}`)
                         .setMinValues(0)
                         .setMaxValues(1);
                     
+                    const start = effectivePage * PAGE_SIZE;
+                    const end = start + PAGE_SIZE;
+                    const pageItems = sortedItems.slice(start, end);
+
                     const seenValues = new Set();
                     const currentSelection = currentSelections[slot];
                     const options = [];
                     
-                    sortedItems.forEach(item => {
+                    // Add Previous Page option
+                    if (effectivePage > 0) {
+                        options.push(new StringSelectMenuOptionBuilder()
+                            .setLabel('⬅️ Previous Page')
+                            .setValue('page_prev')
+                            .setDescription(`Go to page ${effectivePage}`));
+                    }
+                    
+                    pageItems.forEach(item => {
                         const value = `${item.name}|${item.tierEquivalent}|${item.slot}`;
                         if (seenValues.has(value)) return;
                         seenValues.add(value);
@@ -480,24 +553,29 @@ module.exports = {
                         options.push(option);
                     });
 
-                    // Discord hard-limit: max 25 options per select menu.
-                    // Keep the currently-selected option visible even if it falls outside the first 25.
-                    let finalOptions = options;
-                    if (options.length > MAX_SELECT_OPTIONS) {
-                        const selectedValue = currentSelection
-                            ? `${currentSelection.name}|${currentSelection.tierEquivalent}|${slot}`
-                            : null;
-                        const selectedOption = selectedValue ? options.find(o => o.data?.value === selectedValue) : null;
-
-                        finalOptions = options.slice(0, MAX_SELECT_OPTIONS);
-                        if (selectedOption && !finalOptions.some(o => o.data?.value === selectedValue)) {
-                            finalOptions = [selectedOption, ...finalOptions.slice(0, MAX_SELECT_OPTIONS - 1)];
-                        }
-
-                        selectMenu.setPlaceholder(`Select ${formatSlotName(slot)} (showing ${finalOptions.length}/${options.length})`);
+                    // Add Next Page option
+                    if (effectivePage < totalPages - 1) {
+                        options.push(new StringSelectMenuOptionBuilder()
+                            .setLabel('➡️ Next Page')
+                            .setValue('page_next')
+                            .setDescription(`Go to page ${effectivePage + 2}`));
                     }
 
-                    selectMenu.addOptions(finalOptions);
+                    // Set placeholder
+                    if (currentSelection) {
+                         const selectedValue = `${currentSelection.name}|${currentSelection.tierEquivalent}|${slot}`;
+                         const isSelectedInPage = pageItems.some(item => `${item.name}|${item.tierEquivalent}|${item.slot}` === selectedValue);
+                         
+                         if (isSelectedInPage) {
+                             selectMenu.setPlaceholder(`Select ${formatSlotName(slot)}`);
+                         } else {
+                             selectMenu.setPlaceholder(`${formatSlotName(slot)} (Selected: ${currentSelection.name})`);
+                         }
+                    } else {
+                        selectMenu.setPlaceholder(`Select ${formatSlotName(slot)} (Page ${effectivePage + 1}/${totalPages})`);
+                    }
+
+                    selectMenu.addOptions(options);
                 }
                 
                 return selectMenu;
@@ -585,6 +663,10 @@ module.exports = {
             const currentEmbed = interaction.message.embeds[0];
             let currentSelections = parseSelectionsFromEmbed(currentEmbed);
 
+            // Recover current pages from existing components
+            const slotPages = getSlotPagesFromComponents(interaction.message.components);
+            currentSelections.slotPages = slotPages;
+
             // Handle tier selection (only on page 1)
             if (customId === 'regear_tier') {
                 if (interaction.values.length === 0 || interaction.values[0] === 'none') {
@@ -598,7 +680,11 @@ module.exports = {
                 }
             } else {
                 // Handle slot selection
-                const slot = customId.replace('regear_', '');
+                // customId format: regear_slot or regear_slot_page
+                const parts = customId.split('_');
+                // parts[0] = 'regear'
+                // parts[1] = slot
+                const slot = parts[1];
                 
                 if (!VALID_SLOTS.includes(slot)) {
                     try {
@@ -613,13 +699,19 @@ module.exports = {
                     return true;
                 }
 
-                // Handle deselection
-                if (interaction.values.length === 0 || interaction.values[0] === 'none') {
+                const selectedValue = interaction.values[0];
+
+                // Handle pagination
+                if (selectedValue === 'page_next') {
+                    currentSelections.slotPages[slot] = (currentSelections.slotPages[slot] || 0) + 1;
+                } else if (selectedValue === 'page_prev') {
+                    currentSelections.slotPages[slot] = Math.max(0, (currentSelections.slotPages[slot] || 0) - 1);
+                } else if (selectedValue === 'none') {
                     // Remove selection for this slot
                     delete currentSelections[slot];
                 } else {
+                    // Real item selection
                     // Parse the selected value: name|tierEquivalent|slot
-                    const selectedValue = interaction.values[0];
                     const [gearName, tierEquivalent, gearSlot] = selectedValue.split('|');
                     
                     // Store the selection
@@ -1074,26 +1166,6 @@ module.exports = {
             // Get guildId from reservation if needed (for DM interactions)
             const guildId = reservation.guildId || interaction.guildId;
 
-            // Check if user has regear permission or is the issuer
-            const hasPermission = await this.checkRegearPermission(interaction, db, guildId);
-            const isIssuer = interaction.user.id === reservation.issuerId;
-            
-            if (!hasPermission && !isIssuer) {
-                const embed = new EmbedBuilder()
-                    .setColor('#FF0000')
-                    .setTitle('❌ Permission Denied')
-                    .setDescription('You do not have permission to confirm regear pickups.\n\n**Required:** Administrator role, regear permission, or be the issuer')
-                    .setFooter({ text: 'Phoenix Assistance Bot' })
-                    .setTimestamp();
-                
-                if (interaction.deferred || interaction.replied) {
-                    await interaction.followUp({ embeds: [embed], ephemeral: true });
-                } else {
-                    await interaction.reply({ embeds: [embed], ephemeral: true });
-                }
-                return;
-            }
-
             // Check if already completed
             if (reservation.status === 'COMPLETED') {
                 if (interaction.deferred || interaction.replied) {
@@ -1256,26 +1328,6 @@ module.exports = {
 
             // Get guildId from reservation if needed (for DM interactions)
             const guildId = reservation.guildId || interaction.guildId;
-
-            // Check if user has regear permission or is the issuer
-            const hasPermission = await this.checkRegearPermission(interaction, db, guildId);
-            const isIssuer = interaction.user.id === reservation.issuerId;
-            
-            if (!hasPermission && !isIssuer) {
-                const embed = new EmbedBuilder()
-                    .setColor('#FF0000')
-                    .setTitle('❌ Permission Denied')
-                    .setDescription('You do not have permission to cancel regear reservations.\n\n**Required:** Administrator role, regear permission, or be the issuer')
-                    .setFooter({ text: 'Phoenix Assistance Bot' })
-                    .setTimestamp();
-                
-                if (interaction.deferred || interaction.replied) {
-                    await interaction.followUp({ embeds: [embed], ephemeral: true });
-                } else {
-                    await interaction.reply({ embeds: [embed], ephemeral: true });
-                }
-                return;
-            }
 
             // Check if already completed
             if (reservation.status === 'COMPLETED') {

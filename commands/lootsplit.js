@@ -18,6 +18,11 @@ module.exports = {
                 .setDescription('Total loot amount in silver')
                 .setRequired(true)
                 .setMinValue(1))
+        .addIntegerOption(option =>
+            option.setName('repair_fees')
+                .setDescription('Repair fees to deduct from total loot')
+                .setRequired(true)
+                .setMinValue(0))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async autocomplete(interaction) {
@@ -143,6 +148,7 @@ module.exports = {
             const splitType = interaction.options.getString('split_type');
             const usersInput = interaction.options.getString('users');
             const totalLoot = interaction.options.getInteger('total_loot');
+            const repairFees = interaction.options.getInteger('repair_fees');
 
             // Check if content type exists
             const contentTypes = await db.getContentTypes(interaction.guildId);
@@ -335,14 +341,24 @@ module.exports = {
                     } else {
                         console.log(`Using configured tax rate: ${taxRate}%`);
                     }
-                    const taxAmount = Math.floor(totalLoot * taxRate / 100);
-                    const remainingLoot = totalLoot - taxAmount;
+
+                    // Calculate with repair fees logic
+                    // 1. Repair fees taken out of total loot
+                    const netLoot = Math.max(0, totalLoot - repairFees);
+                    
+                    // 2. Subtract tax rate (from the net loot)
+                    const taxAmount = Math.floor(netLoot * taxRate / 100);
+                    
+                    // 3. Split the rest to members
+                    const remainingLoot = netLoot - taxAmount;
                     const payoutPerPlayer = Math.floor(remainingLoot / validUserIds.length);
 
                     // Create loot split data
                     const splitData = {
                         splitType: splitType,
                         totalLoot: totalLoot,
+                        repairFees: repairFees,
+                        netLoot: netLoot,
                         taxRate: taxRate,
                         taxAmount: taxAmount,
                         payoutPerPlayer: payoutPerPlayer,
@@ -389,11 +405,15 @@ module.exports = {
                             .setTitle('💰 Loot Split')
                             .addFields(
                                 { name: 'Total Loot', value: totalLoot.toLocaleString(), inline: true },
-                                { name: 'Guild Split Fee', value: taxAmount.toLocaleString(), inline: true },
-                                { name: 'Payout Per Player', value: payoutPerPlayer.toLocaleString(), inline: true }
+                                { name: 'Repair Fees', value: repairFees.toLocaleString(), inline: true },
+                                { name: 'Net Loot', value: netLoot.toLocaleString(), inline: true }
                             )
                             .addFields(
-                                { name: 'User Count', value: validUserIds.length.toString(), inline: true },
+                                { name: 'Guild Split Fee', value: taxAmount.toLocaleString(), inline: true },
+                                { name: 'Payout Per Player', value: payoutPerPlayer.toLocaleString(), inline: true },
+                                { name: 'User Count', value: validUserIds.length.toString(), inline: true }
+                            )
+                            .addFields(
                                 { name: 'Split Type', value: splitType, inline: true }
                             )
                             .addFields({
