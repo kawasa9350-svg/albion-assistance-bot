@@ -79,7 +79,7 @@ module.exports = {
                                     { name: '1. /add-content [content]', value: 'Add a new content type (requires permission)', inline: false },
                                     { name: '2. /content-list', value: 'List all available content types', inline: false },
                                     { name: '3. /taxrate [content_type] [tax_percentage]', value: 'Set tax rate for content type (Admin only)', inline: false },
-                                    { name: '4. /lootsplit [split_type] [users] [total_loot]', value: 'Create loot split with tax calculations', inline: false },
+                                    { name: '4. /lootsplit [split_type] [users] [repair_fees] [total_loot]', value: 'Create loot split where repair fees are removed before tax and split', inline: false },
                                     { name: '5. /paycheck add [users] [amount]', value: 'Add silver to user accounts', inline: false },
                                     { name: '6. /paycheck remove [users] [amount]', value: 'Remove silver from user accounts', inline: false },
                                     { name: '7. /build create [name]', value: 'Create a new build (requires permission)', inline: false },
